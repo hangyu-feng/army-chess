@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://army-chess.local/contracts/realtime.schema.json",
+  "title": "Army Chess Realtime Envelope",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {"type": "string", "minLength": 1, "maxLength": 64},
+    "requestId": {"type": "string", "maxLength": 128},
+    "roomVersion": {"type": "integer", "minimum": 0},
+    "payload": {}
+  },
+  "additionalProperties": false
+}

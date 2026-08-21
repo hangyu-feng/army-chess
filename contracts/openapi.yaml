@@ -1,0 +1,137 @@
+openapi: 3.1.0
+info:
+  title: Army Chess API
+  version: 1.0.0
+  description: HTTP surface for the self-hosted four-player Army Chess service.
+servers:
+  - url: /
+paths:
+  /api/session:
+    post:
+      summary: Start a username session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username: {type: string, pattern: '^[a-z][a-z_]{1,18}[a-z]$'}
+      responses:
+        '201': {description: Session created}
+    delete:
+      summary: End the current session
+      responses:
+        '204': {description: Session ended}
+  /api/me:
+    get:
+      summary: Get the current profile
+      responses:
+        '200': {description: Current profile}
+  /api/rooms:
+    post:
+      summary: Create a private room
+      security: [{cookieAuth: []}]
+      responses:
+        '201': {description: Room created}
+  /api/rooms/{code}:
+    get:
+      summary: Inspect a room's public roster
+      parameters:
+        - {$ref: '#/components/parameters/RoomCode'}
+      responses:
+        '200': {description: Public room information}
+  /api/rooms/{code}/join:
+    post:
+      summary: Join as player or spectator
+      security: [{cookieAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/RoomCode'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                spectator: {type: boolean, default: false}
+      responses:
+        '200': {description: Joined}
+  /api/rooms/{code}/ws:
+    get:
+      summary: Realtime room connection
+      parameters:
+        - {$ref: '#/components/parameters/RoomCode'}
+      responses:
+        '101': {description: WebSocket upgrade}
+  /api/matches/{id}/replay:
+    get:
+      summary: Read a completed match replay
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200': {description: Completed canonical replay}
+        '404': {description: Replay not found or match is still active}
+  /api/layouts:
+    get:
+      summary: List saved deployments for the current profile
+      security: [{cookieAuth: []}]
+      responses: {'200': {description: Saved layouts}}
+    post:
+      summary: Save a named deployment
+      security: [{cookieAuth: []}]
+      responses: {'201': {description: Layout saved}}
+  /api/layouts/{id}:
+    put:
+      summary: Replace a saved deployment
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses: {'200': {description: Layout updated}}
+    delete:
+      summary: Delete a saved deployment
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses: {'204': {description: Layout deleted}}
+  /api/profiles/{username}:
+    get:
+      summary: Read a public profile summary
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: {type: string}
+      responses: {'200': {description: Profile summary}, '404': {description: Profile not found}}
+  /api/profiles/{username}/matches:
+    get:
+      summary: List a profile's completed and active matches
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: {type: string}
+      responses: {'200': {description: Match history}}
+  /healthz:
+    get: {summary: Process health, responses: {'200': {description: Healthy}}}
+  /readyz:
+    get: {summary: Dependency readiness, responses: {'200': {description: Ready}, '503': {description: Not ready}}}
+components:
+  securitySchemes:
+    cookieAuth: {type: apiKey, in: cookie, name: army_session}
+  parameters:
+    RoomCode:
+      name: code
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[A-Z2-9]{8}$'}

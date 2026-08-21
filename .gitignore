@@ -1,2 +1,9 @@
 .codex/
 AGENTS.md
+web/node_modules/
+web/dist/
+web/coverage/
+web/tsconfig.tsbuildinfo
+deploy/.env
+*.test
+army-chess

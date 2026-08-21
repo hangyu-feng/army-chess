@@ -1,0 +1,6 @@
+.git
+.codex
+node_modules
+web/dist
+web/coverage
+*.log

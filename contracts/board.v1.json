@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Army Chess Board v1",
+  "version": "board.v1",
+  "width": 12,
+  "height": 12,
+  "coordinateSystem": "normalized-origin-top-left",
+  "nodeIdPattern": "n{xx}_{yy}",
+  "topology": {
+    "grid": "orthogonal",
+    "edgeType": "rail",
+    "roadMove": "one-adjacent-edge",
+    "railMove": "unobstructed-straight-route",
+    "engineerRailMove": "unobstructed-connected-route"
+  },
+  "deploymentZones": {
+    "north": {"x": [0, 1, 2, 3, 4], "y": [0, 1, 2, 3, 4]},
+    "east":  {"x": [7, 8, 9, 10, 11], "y": [0, 1, 2, 3, 4]},
+    "south": {"x": [7, 8, 9, 10, 11], "y": [7, 8, 9, 10, 11]},
+    "west":  {"x": [0, 1, 2, 3, 4], "y": [7, 8, 9, 10, 11]}
+  },
+  "headquarters": "first-and-last-node-in-sorted-deployment-zone",
+  "camps": [[5, 5], [6, 5], [5, 6], [6, 6]]
+}
