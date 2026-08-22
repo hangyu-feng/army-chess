@@ -14,6 +14,34 @@ Build a self-hosted browser application for four-player, two-versus-two 四国�
 
 The rules baseline is the common JJ-style ruleset, which documents the conventional 25-piece army, protected camps, railway movement, setup restrictions, timeouts, elimination, and draws. Because published sources acknowledge that 四国军棋 has no single official ruleset, every disputed behavior is fixed below rather than inferred. See the [JJ rules](https://www.jj.cn/news/320/20110927135600018503.shtml) and [rules-variation overview](https://ty.httpcn.com/baike/qipai_siguojunqi.shtml).
 
+### Current implementation status
+
+As of the current v1 milestone, the repository contains a deployable vertical
+slice rather than the complete roadmap. The implemented and verified path is:
+
+- Go HTTP/WebSocket service with passwordless username sessions, rooms,
+  spectators, reconnect, host transfer, setup, gameplay, draw/resign flows,
+  rematch, replay, profiles, and saved-layout APIs.
+- Pure v1 game rules for deployment, movement, combat, visibility, clocks,
+  elimination, team victory, and draws, with unit and projection tests.
+- PostgreSQL 18 migrations, canonical event persistence, snapshots, active-room
+  recovery, and profile/match history queries.
+- React/Vite client for sign-in, room entry, setup, live play, spectator views,
+  profile pages, and full-truth replay navigation.
+- Dockerfile, Compose, Caddy TLS routing, health/readiness checks, operations
+  documentation, and a GHCR publishing workflow.
+
+Verification completed for this milestone includes `go test -race ./...`,
+`go vet ./...`, the frontend production build, Docker image builds, Compose
+migration/startup, Postgres room recovery after restart, HTTPS SPA fallback,
+profile API access, and an authenticated WebSocket upgrade through Caddy.
+
+The remaining unchecked roadmap items are intentional follow-up work. The most
+important gaps are the exact production board topology, password/ownership
+authentication, rate limiting and metrics, the full saved-layout frontend,
+perspective replay, automated browser E2E coverage, load testing, and a
+published-image Compose variant. See the unchecked items in Phases 0–7 below.
+
 ### Seats, teams, and room lifecycle
 
 - Seats are `north`, `east`, `south`, and `west`.
@@ -148,12 +176,15 @@ Use current patched releases within these majors:
 
 - Go 1.26 with Chi v5.
 - `coder/websocket` for WebSockets.
-- PostgreSQL 18 with native `pgx/v5`.
-- `sqlc` for typed query generation and `tern` for migrations.
+- PostgreSQL 18 with native `pgx/v5`; the current vertical slice uses explicit
+  repository code and plain SQL migrations rather than `sqlc` or `tern`.
 - React 19.2, TypeScript 6, and Vite 8.
-- React Router for routes, TanStack Query for HTTP state, Zustand for realtime room/UI state, and Zod for runtime payload validation.
-- CSS Modules and design tokens; no general-purpose component framework.
-- Go standard testing/fuzzing, Vitest, React Testing Library, and Playwright.
+- The current client uses pathname routing and local React hooks. React Router,
+  TanStack Query, Zustand selectors, and Zod remain planned refinements.
+- A shared CSS stylesheet and design tokens; no general-purpose component
+  framework.
+- Go standard testing with race coverage; Vitest is installed, while React
+  Testing Library and Playwright remain planned additions.
 - Caddy for static files, reverse proxying, WebSocket upgrades, and automatic TLS.
 - Docker Compose with no Redis in v1.
 
@@ -171,7 +202,7 @@ Browser
    Go application
   ├── session/profile service
   ├── room registry
-  ├── one serialized event loop per active room
+  ├── serialized state and timer handling per active room
   ├── pure game engine
   ├── visibility projector
   └── replay/recovery service
@@ -179,13 +210,17 @@ Browser
     PostgreSQL 18
 ```
 
-- Each active room uses one goroutine to serialize commands, timers, persistence, and broadcasts.
+- Each active room serializes commands and timer ticks under a per-room mutex;
+  connection writes have their own per-participant write locks.
 - The game engine receives state plus a command and returns a new state plus domain events; it has no HTTP, WebSocket, SQL, or UI imports.
 - Persist accepted domain events before publishing them to clients.
-- Keep active state in memory and persist a snapshot every 10 accepted moves and at every phase transition.
-- Recover active rooms from the latest snapshot plus subsequent events after restart.
-- Store deadline timestamps so overdue turns can be resolved deterministically after recovery.
-- Graceful shutdown stops new joins, snapshots active rooms, and closes WebSockets with a retryable service-restart code.
+- Keep active state in memory and persist a snapshot on the first event, every
+  10 events, and when a match finishes.
+- Recover active rooms from the latest canonical persisted event payload and
+  participant records after restart.
+- Store deadline timestamps so overdue turns can be resolved after recovery.
+- Graceful shutdown closes the HTTP service; accepted events remain durable and
+  active rooms can be reconstructed on the next start.
 - A single backend instance owns rooms in v1; Redis and multi-instance routing remain future work.
 
 ### Repository layout
@@ -195,26 +230,17 @@ army_chess/
 ├── server/
 │   ├── cmd/army-chess/        # process entrypoint
 │   ├── internal/game/         # pure state, rules, events, visibility, replay
-│   ├── internal/rooms/        # room loops, clocks, subscribers, recovery
+│   ├── internal/rooms/        # room state, clocks, subscribers, recovery
 │   ├── internal/httpapi/      # Chi handlers and middleware
-│   ├── internal/realtime/     # WebSocket protocol and projections
-│   ├── internal/persistence/  # pgx/sqlc repositories
-│   └── internal/observability/
+│   └── internal/persistence/  # pgx repositories
 ├── web/
-│   └── src/
-│       ├── app/
-│       ├── features/{session,lobby,setup,game,spectate,replay,profile}/
-│       ├── components/
-│       ├── realtime/
-│       ├── state/
-│       └── styles/
+│   └── src/                   # React/Vite client
 ├── contracts/
 │   ├── board.v1.json
 │   ├── openapi.yaml
 │   └── realtime.schema.json
 ├── db/
 │   ├── migrations/
-│   └── queries/
 ├── deploy/
 │   ├── compose.yaml
 │   └── Caddyfile
@@ -253,7 +279,7 @@ GET    /api/me
 POST   /api/rooms
 GET    /api/rooms/{code}
 POST   /api/rooms/{code}/join
-POST   /api/rooms/{code}/leave
+POST   /api/rooms/{code}/leave       # planned; v1 client leaves by closing WebSocket
 
 GET    /api/layouts
 POST   /api/layouts
@@ -266,7 +292,7 @@ GET    /api/matches/{id}/replay
 
 GET    /healthz
 GET    /readyz
-GET    /metrics
+GET    /metrics                      # planned
 ```
 
 WebSocket endpoint:
@@ -337,69 +363,72 @@ Routes are `/`, `/room/:code`, `/profile/:username`, and `/replay/:matchId`.
 
 ### Phase 0 — Rules and contracts
 
-- [ ] Write `docs/rules.md` with every rule above, diagrams for camps/headquarters/rail turns, combat matrix, visibility matrix, clocks, draws, and elimination.
-- [ ] Create and manually verify `board.v1.json`.
-- [ ] Define engine commands, domain events, phases, seats, teams, visibility modes, and error codes.
-- [ ] Draft OpenAPI and realtime schemas before handlers.
+- [x] Write `docs/rules.md` with the executable v1 rules baseline, visibility modes, clocks, draws, and elimination behavior.
+- [x] Create and manually verify the generated v1 board contract in `board.v1.json`.
+- [x] Define engine commands, domain events, phases, seats, teams, visibility modes, and error codes.
+- [x] Draft OpenAPI and realtime schemas before handlers.
 - [ ] Produce low-fidelity wireframes for every screen and desktop/mobile game layouts.
 
 Exit criteria: all legal movement examples, combat outcomes, visibility projections, and room transitions can be expressed without implementation-specific exceptions.
 
 ### Phase 1 — Foundation and deployment
 
-- [ ] Scaffold Go and React applications with strict linting, formatting, dependency locking, and CI.
-- [ ] Add PostgreSQL migrations, sqlc generation, local development Compose, Caddy routing, health checks, and one-shot migration service.
-- [ ] Add structured JSON logging with request/room/match IDs and Prometheus metrics.
-- [ ] Serve the production Vite build from Caddy; runtime Compose contains only Caddy, Go, and PostgreSQL.
+- [x] Scaffold Go and React applications with dependency locking; strict linting and CI remain follow-up work.
+- [x] Add PostgreSQL migrations, plain-SQL migration execution, local development Compose, Caddy routing, health checks, and a one-shot migration service.
+- [x] Add structured JSON logging; request/room/match log correlation and Prometheus metrics remain follow-up work.
+- [x] Serve the production Vite build from the Go service behind Caddy; runtime Compose contains Caddy, Go, PostgreSQL, and the migration job.
 
 Exit criteria: one command starts the stack, migrations complete automatically, frontend reaches the API through Caddy, and health/readiness checks reflect PostgreSQL availability.
 
 ### Phase 2 — Pure game engine
 
-- [ ] Implement topology loading and validation, deployment validation, legal movement, combat, turn order, timers as commands, elimination, team victory, draws, and replayable events.
-- [ ] Implement canonical state plus four player projections and the public spectator projection.
-- [ ] Add deterministic state reconstruction and ruleset/board versioning.
+- [x] Implement the v1 generated topology, deployment validation, legal movement, combat, turn order, timer handling, elimination, team victory, draws, and replayable events.
+- [x] Implement canonical state plus four player projections and the public spectator projection.
+- [x] Add persisted event reconstruction and ruleset/board version contracts; injected deterministic clocks and randomness remain follow-up work.
 - [ ] Use injected clock and randomness interfaces for deterministic tests.
 
 Exit criteria: the complete rules suite passes without importing HTTP, SQL, or WebSocket packages, and visibility tests prove no unauthorized rank is serialized.
 
 ### Phase 3 — Persistence and identity
 
-- [ ] Implement passwordless username sessions, profiles, saved layouts, room/match records, event append, snapshots, recovery, replays, and statistics.
-- [ ] Enforce username and invite-code uniqueness transactionally.
-- [ ] Store session tokens hashed; use `HttpOnly`, `Secure`, `SameSite=Lax` cookies.
-- [ ] Validate same-origin HTTP and WebSocket requests and add bounded per-IP/session rate limits.
+- [x] Implement passwordless username sessions, profiles, saved-layout APIs, room/match records, event append, snapshots, recovery, replays, and statistics.
+- [x] Enforce username and invite-code uniqueness at the database layer.
+- [x] Store session tokens hashed; use `HttpOnly`, `Secure`, `SameSite=Lax` cookies.
+- [x] Validate same-origin HTTP and WebSocket requests; bounded per-IP/session rate limits remain follow-up work.
 
 Exit criteria: layouts and history survive restart, active matches reconstruct exactly, and database-write failure prevents state publication.
 
 ### Phase 4 — Realtime rooms
 
-- [ ] Implement room registry, one-goroutine room loops, host transfer, seat selection, spectators, setup deadlines, turn deadlines, draw voting, resignations, rematch, reconnect, deduplication, and redacted fan-out.
-- [ ] Use scoped snapshots for each player and public snapshots for spectators.
-- [ ] Enforce the configured spectator cap and reject command attempts from spectators.
+- [x] Implement the room registry, serialized per-room command handling, host transfer, seat selection, spectators, setup deadlines, turn deadlines, draw voting, resignations, rematch, reconnect, deduplication, and redacted fan-out.
+- [x] Use scoped snapshots for each player and public snapshots for spectators.
+- [x] Enforce the configured spectator cap and reject command attempts from spectators.
 
 Exit criteria: four independent clients can complete a match; a fifth client can spectate without receiving hidden ranks; reconnect restores the correct scoped state.
 
 ### Phase 5 — Player frontend
 
-- [ ] Build sign-in, home, room lobby, setup editor, saved layouts, responsive board, clocks, system events, move controls, draw/resign flows, connection state, and error recovery.
+- [x] Build the v1 sign-in, home, room lobby, setup editor, responsive board, clocks, system events, move controls, draw/resign flows, connection state, and error recovery.
+- [ ] Add the saved-layout browser/editor, drag-and-drop setup, and the remaining narrow-screen board navigation refinements.
 - [ ] Keep room state in Zustand with narrow selectors to avoid whole-board rerenders.
 - [ ] Use TanStack Query only for durable HTTP resources and keep WebSocket state separate.
-- [ ] Add keyboard behavior, reduced motion, accessible labels, and narrow-screen board navigation.
+- [x] Add reduced-motion support and accessible board labels; keyboard behavior and narrow-screen board navigation remain follow-up work.
 
 Exit criteria: all three visibility modes render correctly, player input remains responsive during events, and invalid or stale actions recover through server state rather than optimistic corruption.
 
 ### Phase 6 — Spectators, replays, and profiles
 
-- [ ] Complete public spectator mode, full postgame truth, perspective replay, timeline controls, profile statistics, match history, and same-room reseating.
-- [ ] Ensure live URLs never expose canonical events while completed replay endpoints intentionally permit full truth.
+- [x] Implement public spectator mode, full postgame truth, basic timeline controls, profile statistics, match history, and same-room rematch/reseating.
+- [ ] Add seat-perspective replay and richer replay controls.
+- [x] Ensure live URLs never expose canonical events while completed replay endpoints intentionally permit full truth.
 
 Exit criteria: full matches replay deterministically to the exact terminal state and live spectators cannot obtain hidden ranks through HTTP, WebSocket, page source, logs, or reconnect payloads.
 
 ### Phase 7 — Hardening and release
 
-- [ ] Add graceful restart/recovery, database backup/restore documentation, retention settings, security headers, dependency scanning, container resource limits, and production Caddy/TLS guidance.
-- [ ] Document upgrades, migrations, `pg_dump` backup, restore drill, log inspection, metrics, and username deletion through operational tooling.
+- [x] Add graceful restart/recovery, database backup guidance, security headers, and production Caddy/TLS guidance.
+- [ ] Add retention settings, dependency scanning, container resource limits, and a tested restore drill.
+- [x] Document upgrades, migrations, `pg_dump` backup, log inspection, and readiness checks; metrics and username deletion tooling remain.
 - [ ] Load-test one room with four players plus 50 spectators and an aggregate of 25 active rooms/350 sockets.
 - [ ] Publish a versioned rules reference in the UI.
 
@@ -437,6 +466,19 @@ Exit criteria: no race detector failures; p95 server command processing stays be
 - E2E scenarios cover all three visibility modes, seat contention, saved setup, timeout, combat, flag reveal, elimination, draw, reconnect, host transfer, rematch, replay, and restart recovery.
 - Assert on captured network payloads that each context receives only authorized ranks.
 - Verify current Chrome, Firefox, Safari/WebKit, and Edge-compatible Chromium; desktop is primary, mobile is functionally supported.
+
+### Current v1 verification
+
+- [x] Game-engine unit tests cover board construction, deployment, movement,
+  combat, visibility, clocks, elimination, draws, and terminal flow.
+- [x] HTTP and WebSocket integration tests cover session, room, scoped
+  snapshots, spectator behavior, reconnect, and rematch behavior.
+- [x] `go test -race ./...` and `go vet ./...` pass.
+- [x] Frontend production build, Docker image build, Compose migrations,
+  readiness, HTTPS SPA fallback, profile access, room recovery, and Caddy
+  WebSocket upgrade were verified locally.
+- [ ] PostgreSQL failure-injection, browser E2E, accessibility automation,
+  load testing, fuzzing, and cross-browser acceptance remain outstanding.
 
 ### Explicit v1 exclusions and defaults
 

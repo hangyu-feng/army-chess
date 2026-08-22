@@ -232,10 +232,11 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The image is published as:
+The workflow publishes both a versioned tag and the moving `latest` tag:
 
 ```text
 ghcr.io/YOUR_GITHUB_USERNAME/YOUR_REPOSITORY:v0.1.0
+ghcr.io/YOUR_GITHUB_USERNAME/YOUR_REPOSITORY:latest
 ```
 
 After the first workflow run, set the package visibility to Public in GitHub
