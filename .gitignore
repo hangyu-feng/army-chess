@@ -6,4 +6,4 @@ web/coverage/
 web/tsconfig.tsbuildinfo
 deploy/.env
 *.test
-army-chess
+/army-chess
