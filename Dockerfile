@@ -1,16 +1,18 @@
-FROM node:24-alpine AS web-build
+FROM --platform=$BUILDPLATFORM node:24-alpine AS web-build
 WORKDIR /src/web
 COPY web/package*.json ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.26-alpine AS server-build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS server-build
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY server/ ./server/
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /out/army-chess ./server/cmd/army-chess
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/army-chess ./server/cmd/army-chess
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates wget
