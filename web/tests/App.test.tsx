@@ -126,6 +126,8 @@ describe("login and home screens", () => {
 
     const link = container.querySelector("input[aria-label='房间分享链接']") as HTMLInputElement | null;
     expect(link?.value).toBe("https://chess.example.test/?room=ABCD2345");
+    expect(container.querySelector(".share-link")).toBeNull();
+    expect(container.textContent).not.toContain("进入后默认在旁观席");
 
     const copyButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "复制");
     await act(async () => {
@@ -223,11 +225,13 @@ describe("room board interactions", () => {
   it("renders the classic board and sends a lobby arrangement swap", async () => {
     await renderApp();
     await waitFor(() => container.querySelector(".join-room-card") !== null);
-    const join = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "作为玩家加入");
+    const join = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "进入");
     await act(async () => {
       join?.click();
       await Promise.resolve();
     });
+    const joinRequest = fetchMock.mock.calls.find(([input, init]) => input === "/api/rooms/ABCD2345/join" && init?.method === "POST");
+    expect(joinRequest?.[1]?.body).toBe("{}");
     await waitFor(() => TestWebSocket.current?.readyState === 1);
     TestWebSocket.current?.emit({
       type: "snapshot",
@@ -306,6 +310,115 @@ describe("room board interactions", () => {
     expect(message.type).toBe("setup.replace");
     expect(message.payload.pieces["north-r1-1L"]).toMatchObject({ id: "north-2", kind: "engineer" });
     expect(message.payload.pieces["north-r1-1R"]).toMatchObject({ id: "north-1", kind: "company" });
+  });
+
+  it("lists every spectator and lets the current user take and leave a seat", async () => {
+    await renderApp();
+    await waitFor(() => container.querySelector(".join-room-card") !== null);
+    const join = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "进入");
+    await act(async () => {
+      join?.click();
+      await Promise.resolve();
+    });
+    await waitFor(() => TestWebSocket.current?.readyState === 1);
+
+    const baseView = {
+      version: 1,
+      phase: "lobby",
+      mode: "four_dark",
+      clock: "standard",
+      opening: "north",
+      pieces: {},
+      revealedFlags: {},
+    };
+    TestWebSocket.current?.emit({
+      type: "snapshot",
+      payload: {
+        ...baseView,
+        participants: [
+          { username: "baihua", role: "spectator", connected: true, self: true },
+          { username: "observer", role: "spectator", connected: true },
+          { username: "away", role: "spectator", connected: false },
+          { username: "north_user", seat: "north", role: "player", connected: true },
+        ],
+        players: {
+          north: { username: "north_user", ready: false, connected: true, eliminated: false, misses: 0 },
+          east: { username: "", ready: false, connected: false, eliminated: false, misses: 0 },
+          south: { username: "", ready: false, connected: false, eliminated: false, misses: 0 },
+          west: { username: "", ready: false, connected: false, eliminated: false, misses: 0 },
+        },
+      },
+    });
+    await waitFor(() => container.querySelectorAll(".spectator-row").length === 3);
+    const seatList = container.querySelector(".seat-list") as HTMLElement;
+    expect(seatList.querySelector(".panel-heading h2")?.textContent).toBe("座位与队伍");
+    expect(seatList.querySelector(".spectator-list .panel-heading h2")?.textContent).toBe("观众");
+    expect(seatList.querySelector(".spectator-list")?.textContent).toContain("baihua");
+    expect(seatList.querySelector(".spectator-list")?.textContent).toContain("observer");
+    expect(seatList.querySelector(".spectator-list")?.textContent).toContain("away");
+
+    const eastRow = Array.from(container.querySelectorAll(".seat-row")).find((row) => row.querySelector(".seat-badge.east")) as HTMLElement;
+    await act(async () => {
+      (eastRow.querySelector("button") as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+    expect(JSON.parse(TestWebSocket.current?.sent.at(-1) ?? "{}")).toMatchObject({ type: "seat.select", payload: { seat: "east" } });
+
+    TestWebSocket.current?.emit({
+      type: "snapshot",
+      payload: {
+        ...baseView,
+        version: 2,
+        participants: [
+          { username: "baihua", seat: "east", role: "player", connected: true, self: true },
+          { username: "observer", role: "spectator", connected: true },
+          { username: "away", role: "spectator", connected: false },
+          { username: "north_user", seat: "north", role: "player", connected: true },
+        ],
+        players: {
+          north: { username: "north_user", ready: false, connected: true, eliminated: false, misses: 0 },
+          east: { username: "baihua", ready: false, connected: true, eliminated: false, misses: 0 },
+          south: { username: "", ready: false, connected: false, eliminated: false, misses: 0 },
+          west: { username: "", ready: false, connected: false, eliminated: false, misses: 0 },
+        },
+      },
+    });
+    await waitFor(() => container.querySelectorAll(".spectator-row").length === 2);
+    expect(seatList.querySelector(".spectator-list")?.textContent).not.toContain("baihua");
+    expect(seatList.querySelector(".spectator-list")?.textContent).toContain("observer");
+    expect(seatList.querySelector(".spectator-list")?.textContent).toContain("away");
+    const seatedEastRow = Array.from(container.querySelectorAll(".seat-row")).find((row) => row.querySelector(".seat-badge.east")) as HTMLElement;
+    expect(seatedEastRow.textContent).toContain("baihua");
+    expect(seatedEastRow.querySelector("button")?.textContent).toBe("离座");
+
+    await act(async () => {
+      (seatedEastRow.querySelector("button") as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+    expect(JSON.parse(TestWebSocket.current?.sent.at(-1) ?? "{}")).toMatchObject({ type: "seat.leave" });
+
+    TestWebSocket.current?.emit({
+      type: "snapshot",
+      payload: {
+        ...baseView,
+        version: 3,
+        participants: [
+          { username: "baihua", role: "spectator", connected: true, self: true },
+          { username: "observer", role: "spectator", connected: true },
+          { username: "away", role: "spectator", connected: false },
+          { username: "north_user", seat: "north", role: "player", connected: true },
+        ],
+        players: {
+          north: { username: "north_user", ready: false, connected: true, eliminated: false, misses: 0 },
+          east: { username: "", ready: false, connected: false, eliminated: false, misses: 0 },
+          south: { username: "", ready: false, connected: false, eliminated: false, misses: 0 },
+          west: { username: "", ready: false, connected: false, eliminated: false, misses: 0 },
+        },
+      },
+    });
+    await waitFor(() => container.querySelectorAll(".spectator-row").length === 3);
+    expect(seatList.querySelector(".spectator-list")?.textContent).toContain("baihua");
+    expect(seatList.querySelector(".spectator-list")?.textContent).toContain("observer");
   });
 
   it("returns from the room entry screen to username selection", async () => {

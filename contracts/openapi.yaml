@@ -44,18 +44,17 @@ paths:
         '200': {description: Public room information}
   /api/rooms/{code}/join:
     post:
-      summary: Join as player or spectator
+      summary: Join the room in the spectator list
       security: [{cookieAuth: []}]
       parameters:
         - {$ref: '#/components/parameters/RoomCode'}
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              properties:
-                spectator: {type: boolean, default: false}
+              description: Entry is spectator-first; seat selection is a realtime room action.
       responses:
         '200': {description: Joined}
   /api/rooms/{code}/ws:

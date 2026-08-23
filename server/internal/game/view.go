@@ -14,6 +14,14 @@ type VisiblePiece struct {
 	Revealed bool      `json:"revealed,omitempty"`
 }
 
+type ParticipantView struct {
+	Username  string `json:"username"`
+	Seat      Seat   `json:"seat,omitempty"`
+	Role      string `json:"role"`
+	Connected bool   `json:"connected"`
+	Self      bool   `json:"self,omitempty"`
+}
+
 type View struct {
 	MatchID       string                  `json:"matchId,omitempty"`
 	Version       int64                   `json:"version"`
@@ -25,6 +33,7 @@ type View struct {
 	SetupDeadline time.Time               `json:"setupDeadline,omitempty"`
 	Opening       Seat                    `json:"opening"`
 	Players       map[Seat]Player         `json:"players"`
+	Participants  []ParticipantView       `json:"participants"`
 	Pieces        map[string]VisiblePiece `json:"pieces"`
 	RevealedFlags map[Seat]string         `json:"revealedFlags"`
 	LegalMoves    []string                `json:"legalMoves,omitempty"`
@@ -44,6 +53,7 @@ func (s *State) Project(viewer Viewer, board *Board) View {
 		SetupDeadline: s.SetupDeadline,
 		Opening:       s.Opening,
 		Players:       map[Seat]Player{},
+		Participants:  []ParticipantView{},
 		Pieces:        map[string]VisiblePiece{},
 		RevealedFlags: map[Seat]string{},
 		DrawOffer:     s.DrawOffer,

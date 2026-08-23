@@ -20,6 +20,7 @@ type View = {
   setupDeadline?: string;
   opening: Seat;
   players: Record<Seat, Player>;
+  participants: Participant[];
   pieces: Record<string, VisiblePiece>;
   revealedFlags: Record<string, string>;
   legalMoves?: string[];
@@ -28,7 +29,7 @@ type View = {
   result?: { outcome: string; team?: string; reason?: string };
 };
 type Room = { code: string; hostUsername?: string; phase: Phase; mode: Mode; clock: Clock; opening: Seat; participants: Participant[]; spectatorCap: number };
-type Participant = { username: string; seat?: Seat; role: "player" | "spectator"; connected: boolean };
+type Participant = { username: string; seat?: Seat; role: "player" | "spectator"; connected: boolean; self?: boolean };
 type ReplayState = { phase: Phase; turn?: Seat; pieces: Record<string, { owner: Seat; kind: string }>; lastMove?: Move; result?: { outcome: string; team?: string; reason?: string } };
 type ReplayEvent = { sequence: number; type: string; payload: ReplayState; createdAt: string };
 type ProfileSummary = { id: string; username: string; matches: number; wins: number; losses: number; draws: number };
@@ -138,11 +139,11 @@ function SignIn({ onSignedIn }: { onSignedIn: (username: string) => void }) {
 function Home({ user, onRoom, onSwitchUser, onError, error }: { user: string; onRoom: (code: string) => void; onSwitchUser: () => void; onError: (message: string) => void; error: string }) {
   const [code, setCode] = useState("");
   async function create() { try { const room = await api<Room>("/api/rooms", { method: "POST", body: "{}" }); onRoom(room.code); } catch (err) { onError((err as Error).message); } }
-  async function join(spectator = false) { try { const room = await api<Room>(`/api/rooms/${code.trim().toUpperCase()}/join`, { method: "POST", body: JSON.stringify({ spectator }) }); onRoom(room.code); } catch (err) { onError((err as Error).message); } }
+  async function join() { try { const room = await api<Room>(`/api/rooms/${code.trim().toUpperCase()}/join`, { method: "POST", body: JSON.stringify({}) }); onRoom(room.code); } catch (err) { onError((err as Error).message); } }
   async function switchUser() { try { await api<unknown>("/api/session", { method: "DELETE" }); onSwitchUser(); } catch (err) { onError((err as Error).message); } }
   return <main className="page-shell"><header className="topbar"><div className="brand-name">四国军棋</div><button className="user-chip switch-user" type="button" onClick={switchUser}>{user} · 切换用户名</button></header>
     <section className="home-grid"><div className="hero-panel"><h1>房间</h1><p>创建一个房间，或使用邀请码加入朋友的对局。</p><button className="primary large" onClick={create}>创建新房间</button></div>
-    <div className="join-panel"><div className="panel-heading"><h2>加入房间</h2></div><label htmlFor="room-code">房间邀请码</label><input id="room-code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={8} placeholder="ABCDEFGH" /><div className="button-row"><button className="primary" disabled={code.length !== 8} onClick={() => join(false)}>加入对局</button><button className="secondary" disabled={code.length !== 8} onClick={() => join(true)}>旁观</button></div><p className="fine-print">邀请码持有人可以占用空座位，或以旁观者身份加入。</p></div></section>
+    <div className="join-panel"><div className="panel-heading"><h2>加入房间</h2></div><label htmlFor="room-code">房间邀请码</label><input id="room-code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={8} placeholder="ABCDEFGH" /><div className="button-row"><button className="primary" disabled={code.length !== 8} onClick={join}>进入房间</button></div><p className="fine-print">进入房间后默认在旁观席，可随时选择空座位或返回旁观席。</p></div></section>
     {error && <p className="error centered">{error}</p>}
   </main>;
 }
@@ -152,14 +153,13 @@ function RoomScreen({ user, code, baseUrl, onLeave, onError, error }: { user: st
   const [view, setView] = useState<View | null>(null);
   const [joined, setJoined] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
-  const [spectator, setSpectator] = useState(false);
   useEffect(() => {
     let alive = true;
     api<Room>(`/api/rooms/${code}`).then((data) => { if (alive) setRoom(data); }).catch((err) => onError((err as Error).message));
     return () => { alive = false; socketRef.current?.close(); };
   }, [code, onError]);
   async function join() {
-    try { const data = await api<Room>(`/api/rooms/${code}/join`, { method: "POST", body: JSON.stringify({ spectator }) }); setRoom(data); setJoined(true); connect(); }
+    try { const data = await api<Room>(`/api/rooms/${code}/join`, { method: "POST", body: JSON.stringify({}) }); setRoom(data); setJoined(true); connect(); }
     catch (err) { onError((err as Error).message); }
   }
   function connect() {
@@ -172,9 +172,9 @@ function RoomScreen({ user, code, baseUrl, onLeave, onError, error }: { user: st
   }
   function send(type: string, payload: unknown = {}) { socketRef.current?.send(JSON.stringify({ type, requestId: crypto.randomUUID(), payload })); }
   if (!room) return <main className="page-shell"><div className="loading">正在读取房间…</div></main>;
-  if (!joined) return <main className="page-shell"><header className="topbar"><button className="text-button" onClick={onLeave}>← 返回</button><span className="room-code">{code}</span><span className="user-chip">{user}</span></header><section className="join-room-card"><h1>进入房间</h1><p>当前阶段：{phaseLabel(room.phase)} · {room.participants.length} 人在线或已登记</p><div className="entry-options"><button className="primary" onClick={() => { setSpectator(false); join(); }}>作为玩家加入</button><button className="secondary" onClick={() => { setSpectator(true); join(); }}>进入旁观席</button></div><ShareRoom code={code} baseUrl={baseUrl} /></section></main>;
+  if (!joined) return <main className="page-shell"><header className="topbar"><button className="text-button" onClick={onLeave}>← 返回</button><span className="room-code">{code}</span><span className="user-chip">{user}</span></header><section className="join-room-card"><h1>进入房间</h1><p>当前阶段：{phaseLabel(room.phase)} · {room.participants.length} 人在线或已登记</p><button className="primary large" onClick={join}>进入</button><ShareRoom code={code} baseUrl={baseUrl} /></section></main>;
   return <main className="game-shell"><header className="topbar"><button className="text-button" onClick={onLeave}>← 退出房间</button><div className="room-code"><span>ROOM</span> {code}</div><span className="connection-dot">● 已连接</span></header>{error && <div className="toast error">{error}</div>}
-    {!view ? <div className="loading">正在建立实时连接…</div> : <div className="room-layout"><aside className="side-panel left"><RoomHeader room={room} view={view} /><SeatList view={view} user={user} send={send} spectator={spectator} /></aside><section className="board-panel"><Board view={view} user={user} send={send} spectator={spectator} /><GameActions view={view} user={user} send={send} spectator={spectator} /></section><aside className="side-panel right"><ShareRoom code={code} baseUrl={baseUrl} /><EventPanel view={view} /><RoomControls room={room} view={view} send={send} spectator={spectator} /></aside></div>}
+    {!view ? <div className="loading">正在建立实时连接…</div> : <div className="room-layout"><aside className="side-panel left"><RoomHeader room={room} view={view} /><SeatList view={view} user={user} send={send} /></aside><section className="board-panel"><Board view={view} user={user} send={send} /><GameActions view={view} user={user} send={send} /></section><aside className="side-panel right"><ShareRoom code={code} baseUrl={baseUrl} /><EventPanel view={view} /><RoomControls room={room} view={view} user={user} send={send} /></aside></div>}
   </main>;
 }
 
@@ -191,16 +191,30 @@ function ShareRoom({ code, baseUrl }: { code: string; baseUrl: string }) {
       setCopied(false);
     }
   }
-  return <div className="share-card"><div className="panel-heading"><h2>分享房间</h2></div><div className="share-row"><input aria-label="房间分享链接" readOnly value={shareUrl} /><button className="secondary" type="button" onClick={copy}>{copied ? "已复制" : "复制"}</button></div><a className="share-link" href={shareUrl}>{shareUrl}</a></div>;
+  return <div className="share-card"><div className="panel-heading"><h2>分享房间</h2></div><div className="share-row"><input aria-label="房间分享链接" readOnly value={shareUrl} /><button className="secondary" type="button" onClick={copy}>{copied ? "已复制" : "复制"}</button></div></div>;
 }
 
-function SeatList({ view, user, send, spectator }: { view: View; user: string; send: (type: string, payload?: unknown) => void; spectator: boolean }) {
-  return <div className="seat-list"><div className="panel-heading"><h2>座位与队伍</h2></div>{seats.map((seat) => { const player = view.players[seat]; const mine = player?.username === user; return <div className={`seat-row ${mine ? "mine" : ""} ${view.turn === seat ? "turn" : ""}`} key={seat}><span className={`seat-badge ${seat}`}>{seatLabels[seat]}</span><div><strong>{player?.username || "等待玩家"}</strong><span>{player?.eliminated ? "已出局" : player?.connected ? (mine ? "你 · 已连接" : "在线") : player?.username ? "暂离" : "开放座位"}</span></div>{(view.phase === "lobby" || view.phase === "setup") && !spectator && (mine ? <button className="mini-button" onClick={() => send("seat.leave")}>离座</button> : !player?.username ? <button className="mini-button" onClick={() => send("seat.select", { seat })}>入座</button> : null)}{view.turn === seat && view.phase === "playing" && <span className="turn-mark">行动中</span>}</div>; })}<div className="team-key"><span><i className="team north-south" />北 / 南 · 同队</span><span><i className="team east-west" />东 / 西 · 同队</span></div></div>;
+function participantFor(view: View, user: string) {
+  const participants = view.participants ?? [];
+  return participants.find((participant) => participant.self) ?? participants.find((participant) => participant.username === user);
 }
 
-function Board({ view, user, send, spectator }: { view: View; user: string; send: (type: string, payload?: unknown) => void; spectator: boolean }) {
+function seatFor(view: View, user: string): Seat | undefined {
+  const participant = participantFor(view, user);
+  if (participant?.seat) return participant.seat;
+  return seats.find((seat) => view.players[seat]?.username === user);
+}
+
+function SeatList({ view, user, send }: { view: View; user: string; send: (type: string, payload?: unknown) => void }) {
+  const mySeat = seatFor(view, user);
+  const spectators = (view.participants ?? []).filter((participant) => participant.role === "spectator");
+  const canChangeSeats = view.phase === "lobby" || view.phase === "setup";
+  return <div className="seat-list"><div className="panel-heading"><h2>座位与队伍</h2></div>{seats.map((seat) => { const player = view.players[seat]; const mine = mySeat === seat; return <div className={`seat-row ${mine ? "mine" : ""} ${view.turn === seat ? "turn" : ""}`} key={seat}><span className={`seat-badge ${seat}`}>{seatLabels[seat]}</span><div><strong>{player?.username || "等待玩家"}</strong><span>{player?.eliminated ? "已出局" : player?.connected ? (mine ? "你 · 已连接" : "在线") : player?.username ? "暂离" : "开放座位"}</span></div>{canChangeSeats && (mine ? <button className="mini-button" onClick={() => send("seat.leave")}>离座</button> : !player?.username ? <button className="mini-button" onClick={() => send("seat.select", { seat })}>入座</button> : null)}{view.turn === seat && view.phase === "playing" && <span className="turn-mark">行动中</span>}</div>; })}<div className="team-key"><span><i className="team north-south" />北 / 南 · 同队</span><span><i className="team east-west" />东 / 西 · 同队</span></div><div className="spectator-list"><div className="panel-heading"><h2>观众</h2><span className="participant-count">{spectators.length}</span></div>{spectators.length === 0 ? <p className="empty-copy">暂无观众</p> : spectators.map((participant, index) => <div className="spectator-row" key={`${participant.username}-${index}`}><span className="spectator-dot" /><div><strong>{participant.username}{participant.self ? "（你）" : ""}</strong><span>{participant.connected ? "在线 · 可随时入座" : "暂离"}</span></div></div>)}</div></div>;
+}
+
+function Board({ view, user, send }: { view: View; user: string; send: (type: string, payload?: unknown) => void }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const mySeat = seats.find((seat) => view.players[seat]?.username === user);
+  const mySeat = seatFor(view, user);
   const setupMode = view.phase === "lobby" || view.phase === "setup";
   const [setupSelection, setSetupSelection] = useState<SetupSelection>(null);
   const [setupArrangement, setSetupArrangement] = useState<SetupArrangement | null>(null);
@@ -314,8 +328,8 @@ function Board({ view, user, send, spectator }: { view: View; user: string; send
   }
 
   function click(node: string) {
-    if (setupMode && !spectator && mySeat) { clickSetupBoard(node); return; }
-    if (view.phase !== "playing" || spectator) return;
+    if (setupMode && mySeat) { clickSetupBoard(node); return; }
+    if (view.phase !== "playing" || !mySeat) return;
     if (selected && legal.has(`${selected}|${node}`)) { send("move", { from: selected, to: node }); setSelected(null); return; }
     const piece = view.pieces[node];
     if (piece?.owner === mySeat && piece.kind) setSelected(node); else setSelected(null);
@@ -324,7 +338,7 @@ function Board({ view, user, send, spectator }: { view: View; user: string; send
   const setupSelectedTray = setupSelection?.type === "tray" ? setupSelection.index : null;
   const trayCount = setupArrangement?.tray.filter(Boolean).length ?? 0;
   const selectedPiece = setupSelection?.type === "board" ? setupArrangement?.pieces[setupSelection.node] : setupSelection?.type === "tray" ? setupArrangement?.tray[setupSelection.index] : undefined;
-  const showSetupTray = setupMode && Boolean(mySeat) && !spectator;
+  const showSetupTray = setupMode && Boolean(mySeat);
   return <div className="board-wrap"><div className="board-caption"><span>棋盘 · 四国 / 九宫</span><span>{setupMode && mySeat ? (trayCount > 0 ? `临时区还有 ${trayCount} 枚棋子待放回` : selectedPiece ? `已选择：${pieceLabels[selectedPiece.kind ?? ""] ?? "棋子"}，再选择位置` : "点击棋子选择；可放入右侧临时区") : view.phase === "playing" ? "选择棋子，再选择高亮目标" : "等待四席就绪"}</span></div><div className={`board-stage ${showSetupTray ? "with-setup-tray" : ""}`}><BoardCanvas board={boardDefinition} pieces={displayPieces} selected={selected ?? setupSelectedNode} targets={selected ? legal : undefined} onNodeClick={click} /><SetupTray visible={showSetupTray} pieces={setupArrangement?.tray ?? []} selected={setupSelectedTray} onSlotClick={clickSetupTray} /></div></div>;
 }
 
@@ -362,16 +376,17 @@ function BoardCanvas({ board, pieces, selected, targets, onNodeClick, readOnly =
   </svg>;
 }
 
-function GameActions({ view, user, send, spectator }: { view: View; user: string; send: (type: string, payload?: unknown) => void; spectator: boolean }) {
+function GameActions({ view, user, send }: { view: View; user: string; send: (type: string, payload?: unknown) => void }) {
   const countdown = useCountdown(view.phase === "setup" ? view.setupDeadline : view.deadline);
-  const mine = seats.find((seat) => view.players[seat]?.username === user);
+  const mine = seatFor(view, user);
   const player = mine ? view.players[mine] : undefined;
-  return <div className="game-actions"><div className="clock-card"><span>{view.phase === "setup" ? "部署倒计时" : view.phase === "playing" ? `轮到${seatLabels[view.turn ?? "north"]}` : "比赛状态"}</span><strong>{countdown === null ? "—" : `${String(Math.floor(countdown / 60)).padStart(2, "0")}:${String(countdown % 60).padStart(2, "0")}`}</strong></div>{view.phase === "setup" && !spectator && <button className="primary" onClick={() => send("ready", { ready: !player?.ready })}>{player?.ready ? "取消准备" : "准备就绪"}</button>}{view.phase === "playing" && !spectator && <><button className="secondary" onClick={() => send("draw.offer")}>提议和棋</button><button className="danger-button" onClick={() => send("resign")}>认输</button></>}{view.phase === "finished" && !spectator && <button className="primary" onClick={() => send("rematch.ready", { ready: true })}>准备再来一局</button>}{view.drawOffer && view.drawOffer !== mine && <button className="primary" onClick={() => send("draw.respond", { accept: true })}>接受和棋</button>}</div>;
+  const canAct = Boolean(mine);
+  return <div className="game-actions"><div className="clock-card"><span>{view.phase === "setup" ? "部署倒计时" : view.phase === "playing" ? `轮到${seatLabels[view.turn ?? "north"]}` : "比赛状态"}</span><strong>{countdown === null ? "—" : `${String(Math.floor(countdown / 60)).padStart(2, "0")}:${String(countdown % 60).padStart(2, "0")}`}</strong></div>{view.phase === "setup" && canAct && <button className="primary" onClick={() => send("ready", { ready: !player?.ready })}>{player?.ready ? "取消准备" : "准备就绪"}</button>}{view.phase === "playing" && canAct && <><button className="secondary" onClick={() => send("draw.offer")}>提议和棋</button><button className="danger-button" onClick={() => send("resign")}>认输</button></>}{view.phase === "finished" && canAct && <button className="primary" onClick={() => send("rematch.ready", { ready: true })}>准备再来一局</button>}{view.drawOffer && view.drawOffer !== mine && canAct && <button className="primary" onClick={() => send("draw.respond", { accept: true })}>接受和棋</button>}</div>;
 }
 
 function EventPanel({ view }: { view: View }) { return <div className="event-panel"><div className="panel-heading"><h2>战况记录</h2></div>{view.lastMove ? <div className="event-card"><span className="event-tag">最近行动</span><strong>{seatLabels[view.lastMove.seat]} · {view.lastMove.from} → {view.lastMove.to}</strong><span>{combatLabel(view.lastMove.result)}</span></div> : <p className="empty-copy">对局事件会显示在这里。<br />所有时钟由服务端计时。</p>}{view.drawOffer && <div className="draw-banner">{seatLabels[view.drawOffer]}方提议和棋</div>}{view.result && <div className="result-banner"><span>比赛结束</span><strong>{view.result.outcome === "draw" ? "和棋" : `${teamLabel(view.result.team)} 获胜`}</strong><small>{view.result.reason}</small>{view.matchId && <a href={`/replay/${view.matchId}`}>查看完整回放 ↗</a>}</div>}</div>; }
 
-function RoomControls({ room, view, send, spectator }: { room: Room; view: View; send: (type: string, payload?: unknown) => void; spectator: boolean }) { return <div className="room-controls"><div className="panel-heading"><h2>房间设置</h2></div><label>信息模式<select value={view.mode} disabled={view.phase !== "lobby" || spectator} onChange={(e) => send("settings.update", { mode: e.target.value as Mode, clock: view.clock })}><option value="four_dark">四暗</option><option value="double_visible">队友可见</option><option value="fully_visible">全明（玩家）</option></select></label><label>时钟<select value={view.clock} disabled={view.phase !== "lobby" || spectator} onChange={(e) => send("settings.update", { mode: view.mode, clock: e.target.value as Clock })}><option value="fast">快速 · 20 秒</option><option value="standard">标准 · 60 秒</option><option value="relaxed">休闲 · 120 秒</option></select></label><p className="fine-print">{room.participants.filter((p) => p.role === "spectator").length} / {room.spectatorCap} 位旁观者</p></div>; }
+function RoomControls({ room, view, user, send }: { room: Room; view: View; user: string; send: (type: string, payload?: unknown) => void }) { const canChangeSettings = room.hostUsername === user; const spectatorCount = (view.participants ?? []).filter((participant) => participant.role === "spectator").length; return <div className="room-controls"><div className="panel-heading"><h2>房间设置</h2></div><label>信息模式<select value={view.mode} disabled={view.phase !== "lobby" || !canChangeSettings} onChange={(e) => send("settings.update", { mode: e.target.value as Mode, clock: view.clock })}><option value="four_dark">四暗</option><option value="double_visible">队友可见</option><option value="fully_visible">全明（玩家）</option></select></label><label>时钟<select value={view.clock} disabled={view.phase !== "lobby" || !canChangeSettings} onChange={(e) => send("settings.update", { mode: view.mode, clock: e.target.value as Clock })}><option value="fast">快速 · 20 秒</option><option value="standard">标准 · 60 秒</option><option value="relaxed">休闲 · 120 秒</option></select></label><p className="fine-print">{spectatorCount} / {room.spectatorCap} 位观众</p></div>; }
 
 function phaseLabel(phase: Phase) { return ({ lobby: "等待入场", setup: "部署阵地", playing: "对局进行中", finished: "比赛结束" })[phase]; }
 function modeLabel(mode: Mode) { return ({ four_dark: "四暗模式", double_visible: "队友可见", fully_visible: "全明模式" })[mode]; }

@@ -45,6 +45,28 @@ func TestSessionAndRoomHTTPFlow(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("room lookup status: %d", response.Code)
 	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/rooms/"+room.Code+"/join", strings.NewReader(`{"spectator":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(cookie)
+	response = httptest.NewRecorder()
+	routes.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("room join status: %d", response.Code)
+	}
+	var joined struct {
+		Participants []struct {
+			Username string `json:"username"`
+			Seat     string `json:"seat"`
+			Role     string `json:"role"`
+		} `json:"participants"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&joined); err != nil {
+		t.Fatal(err)
+	}
+	if len(joined.Participants) != 1 || joined.Participants[0].Username != "red_cedar" || joined.Participants[0].Role != "spectator" || joined.Participants[0].Seat != "" {
+		t.Fatalf("join did not return spectator-first roster: %#v", joined.Participants)
+	}
 }
 
 func TestInvalidUsernameIsRejected(t *testing.T) {

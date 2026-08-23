@@ -44,7 +44,7 @@ a { color: inherit; }
 .danger-button { border-color: #80504a; color: #e29a8d; }
 .mini-button { min-height: 28px; padding: 4px 8px; font-size: 11px; }
 .text-button { border: 0; padding: 0; background: transparent; color: var(--muted); }
-.text-button:hover, .share-link:hover { color: var(--text); }
+.text-button:hover { color: var(--text); }
 
 .error { color: #e29a8d; font-size: 13px; }
 .centered { text-align: center; }
@@ -80,7 +80,6 @@ a { color: inherit; }
 .share-card .panel-heading { margin-bottom: 10px; }
 .share-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .share-row input { min-width: 0; color: var(--muted); font-size: 11px; }
-.share-link { display: block; overflow: hidden; margin-top: 8px; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 
 .game-shell { min-height: 100vh; padding: 0 24px 24px; }
 .game-shell .topbar { width: min(100%, 1440px); margin: 0 auto; }
@@ -100,6 +99,15 @@ a { color: inherit; }
 .seat-row div span { margin-top: 3px; color: var(--muted); font-size: 10px; }
 .seat-row.mine strong { color: var(--accent); }
 .seat-row.turn { background: #ffffff08; }
+.spectator-list { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
+.spectator-list .panel-heading { justify-content: space-between; margin-bottom: 8px; }
+.participant-count { color: var(--muted); font-size: 11px; }
+.spectator-row { min-height: 42px; display: flex; align-items: center; gap: 9px; border-top: 1px solid var(--line-soft); }
+.spectator-row > div { min-width: 0; flex: 1; }
+.spectator-row strong, .spectator-row span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spectator-row strong { font-size: 12px; font-weight: 600; }
+.spectator-row span { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.spectator-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .seat-badge { display: grid !important; place-items: center; width: 25px; height: 25px; border: 1px solid currentColor; font-size: 11px !important; }
 .seat-badge.north { color: var(--north); }
 .seat-badge.east { color: var(--east); }

@@ -21,6 +21,17 @@ The executable rules baseline is documented in [docs/rules.md](docs/rules.md),
 with the canonical board diagram in [docs/board-layout.md](docs/board-layout.md).
 The larger product roadmap and explicit non-goals are in [PLAN.md](PLAN.md).
 
+## Room participation
+
+Every person enters a room as a spectator by default. The room roster lists all
+participants, including seated players, spectators, and participants who are
+temporarily disconnected.
+
+During the lobby and setup phases, a spectator can take any open seat. A seated
+player can leave their seat and return to the spectator list, then take another
+open seat later if one is available. Only seated players can arrange pieces or
+submit game actions; spectators can watch and join when a seat opens.
+
 ## Production deployment on a VPS
 
 ### Requirements
@@ -79,6 +90,9 @@ Use a long URL-safe password. A hexadecimal password can be generated with:
 ```sh
 openssl rand -hex 32
 ```
+
+`PUBLIC_BASE_URL` is also used to generate room share links, so set it to the
+URL that other players will use to reach the deployment.
 
 Keep `deploy/.env` private. It is ignored by Git and contains the database
 password used by the application.

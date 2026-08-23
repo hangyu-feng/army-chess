@@ -3,6 +3,7 @@ package rooms_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -152,8 +153,8 @@ func TestRematchClearsSeatsAfterAllPlayersAgree(t *testing.T) {
 		t.Fatalf("rematch did not reset lobby: phase=%s pieces=%d", room.State.Phase, len(room.State.Pieces))
 	}
 	for id, participant := range room.Participants {
-		if participant.Seat.Valid() {
-			t.Fatalf("participant %s retained seat %s", id, participant.Seat)
+		if participant.Seat.Valid() || !participant.Spectator {
+			t.Fatalf("participant %s was not reset to spectators: %#v", id, participant)
 		}
 	}
 }
@@ -191,16 +192,28 @@ func TestRoomCommandsEnforceSpectatorAndHostPermissions(t *testing.T) {
 	if err := room.Join(context.Background(), "spectator", "spectator_user", "", true); err != nil {
 		t.Fatal(err)
 	}
-	if err := room.Handle("spectator", rooms.Envelope{Type: "seat.select", Payload: json.RawMessage(`{"seat":"north"}`)}, time.Now().UTC()); err == nil {
-		t.Fatal("spectator was allowed to issue a command")
+	if err := room.Handle("spectator", rooms.Envelope{Type: "seat.select", Payload: json.RawMessage(`{"seat":"north"}`)}, time.Now().UTC()); err != nil {
+		t.Fatalf("spectator could not take an open seat: %v", err)
+	}
+	if room.Participants["spectator"].Seat != game.North || room.Participants["spectator"].Spectator {
+		t.Fatalf("seat selection did not promote spectator: %#v", room.Participants["spectator"])
+	}
+	if err := room.Handle("spectator", rooms.Envelope{Type: "seat.leave"}, time.Now().UTC()); err != nil {
+		t.Fatalf("seated participant could not return to spectators: %v", err)
+	}
+	if room.Participants["spectator"].Seat.Valid() || !room.Participants["spectator"].Spectator {
+		t.Fatalf("seat leave did not return participant to spectators: %#v", room.Participants["spectator"])
+	}
+	if err := room.Handle("spectator", rooms.Envelope{Type: "move", Payload: json.RawMessage(`{"from":"north-r1-1L","to":"north-r1-2L"}`)}, time.Now().UTC()); err == nil {
+		t.Fatal("spectator was allowed to issue a gameplay command")
 	}
 	if err := room.Handle("spectator", rooms.Envelope{Type: "settings.update", Payload: json.RawMessage(`{"mode":"fully_visible","clock":"fast"}`)}, time.Now().UTC()); err == nil {
 		t.Fatal("spectator was allowed to change settings")
 	}
-	if err := room.Handle("host", rooms.Envelope{Type: "seat.select", Payload: json.RawMessage(`{"seat":"north"}`)}, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
 	if err := room.Handle("host", rooms.Envelope{Type: "settings.update", Payload: json.RawMessage(`{"mode":"fully_visible","clock":"fast"}`)}, time.Now().UTC()); err != nil {
+		t.Fatalf("host could not change settings while spectating: %v", err)
+	}
+	if err := room.Handle("host", rooms.Envelope{Type: "seat.select", Payload: json.RawMessage(`{"seat":"north"}`)}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	if room.State.Mode != game.FullyVisible || room.State.Clock != game.Fast {
@@ -280,5 +293,89 @@ func TestPlayerCanLeaveSeatAndRejoinAnotherSeat(t *testing.T) {
 	}
 	if room.Participants["host"].Seat != game.East || len(room.State.Pieces) != 25 {
 		t.Fatalf("player could not rejoin another seat: participant=%#v pieces=%d", room.Participants["host"], len(room.State.Pieces))
+	}
+}
+
+func TestNewMembersStartAsSpectatorsAndLiveViewListsEveryone(t *testing.T) {
+	registry := rooms.NewRegistry(slog.Default(), nil)
+	room, err := registry.Create(context.Background(), "host", "host_user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := room.Join(context.Background(), "guest", "guest_user", "", false); err != nil {
+		t.Fatal(err)
+	}
+
+	info := room.PublicInfo()
+	participants, ok := info["participants"].([]map[string]any)
+	if !ok || len(participants) != 2 {
+		t.Fatalf("public participant list = %#v", info["participants"])
+	}
+	for _, participant := range participants {
+		if participant["role"] != "spectator" || participant["seat"] != game.Seat("") {
+			t.Fatalf("new member did not start as spectator: %#v", participant)
+		}
+	}
+
+	if err := room.Handle("guest", rooms.Envelope{Type: "seat.select", Payload: json.RawMessage(`{"seat":"east"}`)}, time.Now().UTC()); err != nil {
+		t.Fatalf("spectator could not take a seat: %v", err)
+	}
+	view, err := room.ViewFor("guest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Participants) != 2 {
+		t.Fatalf("live participant list has %d members", len(view.Participants))
+	}
+	for _, participant := range view.Participants {
+		if participant.Username == "guest_user" {
+			if !participant.Self || participant.Role != "player" || participant.Seat != game.East {
+				t.Fatalf("guest view = %#v", participant)
+			}
+		} else if participant.Username == "host_user" {
+			if participant.Role != "spectator" || participant.Seat.Valid() {
+				t.Fatalf("host view = %#v", participant)
+			}
+		}
+	}
+
+	if err := room.Handle("guest", rooms.Envelope{Type: "seat.leave"}, time.Now().UTC()); err != nil {
+		t.Fatalf("guest could not leave seat: %v", err)
+	}
+	view, err = room.ViewFor("guest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, participant := range view.Participants {
+		if participant.Self && (participant.Role != "spectator" || participant.Seat.Valid()) {
+			t.Fatalf("guest did not return to spectators: %#v", participant)
+		}
+	}
+}
+
+func TestSpectatorLimitCountsOnlyUnseatedMembers(t *testing.T) {
+	registry := rooms.NewRegistry(slog.Default(), nil)
+	room, err := registry.Create(context.Background(), "host", "host_user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 49; index++ {
+		id := fmt.Sprintf("spectator-%d", index)
+		if err := room.Join(context.Background(), id, id, "", false); err != nil {
+			t.Fatalf("joining spectator %d: %v", index, err)
+		}
+	}
+	if err := room.Join(context.Background(), "overflow", "overflow", "", false); err == nil {
+		t.Fatal("51st spectator was accepted")
+	}
+
+	if err := room.Handle("host", rooms.Envelope{Type: "seat.select", Payload: json.RawMessage(`{"seat":"north"}`)}, time.Now().UTC()); err != nil {
+		t.Fatalf("host could not leave spectator list for a seat: %v", err)
+	}
+	if err := room.Join(context.Background(), "last", "last", "", false); err != nil {
+		t.Fatalf("joining after a spectator took a seat: %v", err)
+	}
+	if err := room.Join(context.Background(), "overflow-again", "overflow-again", "", false); err == nil {
+		t.Fatal("spectator cap ignored after seat was taken")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -106,7 +107,7 @@ func (r *Registry) Create(ctx context.Context, hostID, username, profileID strin
 			}
 			room.MatchID = matchID
 		}
-		room.Participants[hostID] = &Participant{ID: hostID, Username: username, ProfileID: profileID, Connected: true, JoinedAt: now}
+		room.Participants[hostID] = &Participant{ID: hostID, Username: username, ProfileID: profileID, Spectator: true, Connected: true, JoinedAt: now}
 		if err := room.persistParticipantLocked(ctx, room.Participants[hostID]); err != nil {
 			return nil, err
 		}
@@ -174,7 +175,7 @@ func (r *Registry) Recover(ctx context.Context) error {
 		for _, savedParticipant := range participants {
 			id := "profile:" + savedParticipant.ProfileID
 			seat := game.Seat(savedParticipant.Seat)
-			participant := &Participant{ID: id, ProfileID: savedParticipant.ProfileID, Username: savedParticipant.Username, Seat: seat, Spectator: savedParticipant.Role == "spectator", Ready: false, Connected: false, JoinedAt: time.Now().UTC()}
+			participant := &Participant{ID: id, ProfileID: savedParticipant.ProfileID, Username: savedParticipant.Username, Seat: seat, Spectator: savedParticipant.Role != "player" || !seat.Valid(), Ready: false, Connected: false, JoinedAt: time.Now().UTC()}
 			room.Participants[id] = participant
 			if seat.Valid() {
 				player := state.Players[seat]
@@ -229,15 +230,12 @@ func (r *Room) PublicInfo() map[string]any {
 }
 
 func (r *Room) publicInfoLocked() map[string]any {
-	players := make([]map[string]any, 0, len(r.Participants))
-	for _, participant := range r.Participants {
-		role := "spectator"
-		if !participant.Spectator {
-			role = "player"
-		}
+	participants := r.participantViewsLocked("")
+	players := make([]map[string]any, 0, len(participants))
+	for _, participant := range participants {
 		players = append(players, map[string]any{
 			"username": participant.Username, "seat": participant.Seat,
-			"role": role, "connected": participant.Connected,
+			"role": participant.Role, "connected": participant.Connected,
 		})
 	}
 	hostUsername := ""
@@ -251,14 +249,53 @@ func (r *Room) publicInfoLocked() map[string]any {
 	}
 }
 
-func (r *Room) Join(ctx context.Context, id, username, profileID string, spectator bool) error {
+func (r *Room) participantViewsLocked(selfID string) []game.ParticipantView {
+	participants := make([]game.ParticipantView, 0, len(r.Participants))
+	for _, participant := range r.Participants {
+		role := "spectator"
+		if !participant.Spectator && participant.Seat.Valid() {
+			role = "player"
+		}
+		participants = append(participants, game.ParticipantView{
+			Username:  participant.Username,
+			Seat:      participant.Seat,
+			Role:      role,
+			Connected: participant.Connected,
+			Self:      participant.ID == selfID,
+		})
+	}
+	sort.SliceStable(participants, func(i, j int) bool {
+		left, right := participants[i], participants[j]
+		if left.Seat.Valid() != right.Seat.Valid() {
+			return left.Seat.Valid()
+		}
+		if left.Seat.Valid() && right.Seat.Valid() {
+			return seatOrder(left.Seat) < seatOrder(right.Seat)
+		}
+		return left.Username < right.Username
+	})
+	return participants
+}
+
+func seatOrder(seat game.Seat) int {
+	for index, candidate := range game.Seats {
+		if candidate == seat {
+			return index
+		}
+	}
+	return len(game.Seats)
+}
+
+func (r *Room) Join(ctx context.Context, id, username, profileID string, _ bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if existing, ok := r.Participants[id]; ok {
 		old := snapshotParticipant(existing)
 		existing.Username = username
 		existing.ProfileID = profileID
-		existing.Spectator = spectator
+		if !existing.Seat.Valid() {
+			existing.Spectator = true
+		}
 		existing.Connected = true
 		if err := r.persistParticipantLocked(ctx, existing); err != nil {
 			restoreParticipant(existing, old)
@@ -270,7 +307,10 @@ func (r *Room) Join(ctx context.Context, id, username, profileID string, spectat
 		if profileID != "" && existing.ProfileID == profileID {
 			old := snapshotParticipant(existing)
 			delete(r.Participants, oldID)
-			existing.ID, existing.Username, existing.Spectator, existing.Connected = id, username, spectator, true
+			existing.ID, existing.Username, existing.Connected = id, username, true
+			if !existing.Seat.Valid() {
+				existing.Spectator = true
+			}
 			r.Participants[id] = existing
 			if r.HostID == oldID {
 				r.HostID = id
@@ -284,18 +324,18 @@ func (r *Room) Join(ctx context.Context, id, username, profileID string, spectat
 			return nil
 		}
 	}
-	if spectator {
-		count := 0
-		for _, p := range r.Participants {
-			if p.Spectator {
-				count++
-			}
-		}
-		if count >= 50 {
-			return errors.New("spectator limit reached")
+	count := 0
+	for _, p := range r.Participants {
+		if p.Spectator {
+			count++
 		}
 	}
-	r.Participants[id] = &Participant{ID: id, Username: username, ProfileID: profileID, Spectator: spectator, Connected: true, JoinedAt: time.Now().UTC()}
+	if count >= 50 {
+		return errors.New("spectator limit reached")
+	}
+	// Every new room member starts in the spectator list. Taking a seat is an
+	// explicit realtime action and changes the participant's role to player.
+	r.Participants[id] = &Participant{ID: id, Username: username, ProfileID: profileID, Spectator: true, Connected: true, JoinedAt: time.Now().UTC()}
 	if err := r.persistParticipantLocked(ctx, r.Participants[id]); err != nil {
 		delete(r.Participants, id)
 		return err
@@ -391,6 +431,7 @@ func (r *Room) ViewFor(id string) (game.View, error) {
 		return game.View{}, errors.New("participant not found")
 	}
 	view := r.State.Project(game.Viewer{Seat: participant.Seat, Spectator: participant.Spectator}, r.Board)
+	view.Participants = r.participantViewsLocked(id)
 	view.MatchID = r.MatchID
 	return view, nil
 }
@@ -420,7 +461,7 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 	if !ok {
 		return errors.New("participant not found")
 	}
-	if participant.Spectator {
+	if participant.Spectator && envelope.Type != "seat.select" && !(envelope.Type == "settings.update" && participant.ID == r.HostID) {
 		return errors.New("spectators cannot issue commands")
 	}
 	if r.SeenRequests == nil {
@@ -431,6 +472,7 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 	}
 	before := r.State.Clone()
 	beforeSequence := r.Sequence
+	beforeParticipant := snapshotParticipant(participant)
 	var err error
 	switch envelope.Type {
 	case "seat.select":
@@ -524,12 +566,14 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 			if persistErr := r.persistParticipantLocked(ctx, current); persistErr != nil {
 				r.State = before
 				r.Sequence = beforeSequence
+				restoreParticipant(participant, beforeParticipant)
 				return fmt.Errorf("persist participant: %w", persistErr)
 			}
 		}
 		if persistErr := r.persistLocked(ctx, envelope.Type); persistErr != nil {
 			r.State = before
 			r.Sequence = beforeSequence
+			restoreParticipant(participant, beforeParticipant)
 			return fmt.Errorf("persist command: %w", persistErr)
 		}
 		if envelope.RequestID != "" {
@@ -584,6 +628,7 @@ func (r *Room) leaveSeatLocked(participant *Participant) error {
 	}
 	oldSeat := participant.Seat
 	participant.Seat = ""
+	participant.Spectator = true
 	participant.Ready = false
 	r.State.Players[oldSeat] = game.Player{}
 	for node, piece := range r.State.Pieces {
@@ -703,7 +748,7 @@ func (r *Room) resetRematchLocked(ctx context.Context, now time.Time) error {
 	for _, participant := range r.Participants {
 		participant.Seat = ""
 		participant.Ready = false
-		participant.Spectator = false
+		participant.Spectator = true
 	}
 	r.MatchID = newMatchID
 	r.Sequence = 0
@@ -748,7 +793,9 @@ func (r *Room) viewLocked(id string) (game.View, error) {
 	if !ok {
 		return game.View{}, errors.New("participant not found")
 	}
-	return r.State.Project(game.Viewer{Seat: participant.Seat, Spectator: participant.Spectator}, r.Board), nil
+	view := r.State.Project(game.Viewer{Seat: participant.Seat, Spectator: participant.Spectator}, r.Board)
+	view.Participants = r.participantViewsLocked(id)
+	return view, nil
 }
 
 func (r *Room) SendSnapshot(ctx context.Context, id string) error {

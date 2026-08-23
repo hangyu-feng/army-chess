@@ -87,6 +87,9 @@ func TestWebSocketSnapshotAndSeatCommand(t *testing.T) {
 	} else if first.Type != "snapshot" {
 		t.Fatalf("first realtime message: %s", first.Type)
 	}
+	if len(first.Payload.Participants) != 1 || first.Payload.Participants[0].Username != "ws_host" || first.Payload.Participants[0].Role != "spectator" || !first.Payload.Participants[0].Self {
+		t.Fatalf("initial spectator roster: %#v", first.Payload.Participants)
+	}
 
 	command, _ := json.Marshal(map[string]any{
 		"type": "seat.select", "requestId": "seat-1", "payload": map[string]string{"seat": "north"},
@@ -108,6 +111,28 @@ func TestWebSocketSnapshotAndSeatCommand(t *testing.T) {
 	}
 	if second.Payload.Pieces["north-r6-2L"].Kind != game.Flag {
 		t.Fatalf("owner projection did not include the flag rank")
+	}
+	if len(second.Payload.Participants) != 1 || second.Payload.Participants[0].Seat != game.North || second.Payload.Participants[0].Role != "player" || !second.Payload.Participants[0].Self {
+		t.Fatalf("seated roster: %#v", second.Payload.Participants)
+	}
+
+	leave, _ := json.Marshal(map[string]any{
+		"type": "seat.leave", "requestId": "leave-1", "payload": map[string]any{},
+	})
+	if err := conn.Write(ctx, websocket.MessageText, leave); err != nil {
+		t.Fatal(err)
+	}
+	var third struct {
+		Type    string    `json:"type"`
+		Payload game.View `json:"payload"`
+	}
+	if _, data, err := conn.Read(ctx); err != nil {
+		t.Fatal(err)
+	} else if err := json.Unmarshal(data, &third); err != nil {
+		t.Fatal(err)
+	}
+	if third.Type != "snapshot" || len(third.Payload.Participants) != 1 || third.Payload.Participants[0].Seat.Valid() || third.Payload.Participants[0].Role != "spectator" {
+		t.Fatalf("post-leave spectator roster: type=%s participants=%#v", third.Type, third.Payload.Participants)
 	}
 }
 
