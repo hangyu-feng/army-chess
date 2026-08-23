@@ -18,7 +18,9 @@ import (
 	"github.com/fenghangyu/army-chess/server/internal/persistence"
 )
 
-const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+const codeLetters = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+const codeDigits = "23456789"
+const codeAlphabet = codeLetters + codeDigits
 
 type Participant struct {
 	ID        string
@@ -209,8 +211,16 @@ func newRoomCode() (string, error) {
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
 	}
-	for i := range bytes {
+	bytes[0] = codeLetters[int(bytes[0])%len(codeLetters)]
+	hasDigit := false
+	for i := 1; i < len(bytes); i++ {
 		bytes[i] = codeAlphabet[int(bytes[i])%len(codeAlphabet)]
+		if strings.ContainsRune(codeDigits, rune(bytes[i])) {
+			hasDigit = true
+		}
+	}
+	if !hasDigit {
+		bytes[1] = codeDigits[int(bytes[1])%len(codeDigits)]
 	}
 	return string(bytes), nil
 }
@@ -450,6 +460,15 @@ type response struct {
 	Payload     any    `json:"payload,omitempty"`
 }
 
+func isRoomControl(command string) bool {
+	switch command {
+	case "room.start", "room.pause", "room.resume", "room.stop", "room.reset":
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *Room) Handle(id string, envelope Envelope, now time.Time) error {
 	return r.HandleContext(context.Background(), id, envelope, now)
 }
@@ -461,8 +480,11 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 	if !ok {
 		return errors.New("participant not found")
 	}
-	if participant.Spectator && envelope.Type != "seat.select" && !(envelope.Type == "settings.update" && participant.ID == r.HostID) {
+	if participant.Spectator && envelope.Type != "seat.select" && !isRoomControl(envelope.Type) && !(envelope.Type == "settings.update" && participant.ID == r.HostID) {
 		return errors.New("spectators cannot issue commands")
+	}
+	if r.State.Paused && !isRoomControl(envelope.Type) {
+		return errors.New("room is paused")
 	}
 	if r.SeenRequests == nil {
 		r.SeenRequests = map[string]map[string]bool{}
@@ -472,9 +494,22 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 	}
 	before := r.State.Clone()
 	beforeSequence := r.Sequence
+	beforeMatchID := r.MatchID
+	beforeRematchReady := r.RematchReady
+	beforeSeenRequests := r.SeenRequests
 	beforeParticipant := snapshotParticipant(participant)
 	var err error
 	switch envelope.Type {
+	case "room.start":
+		err = r.State.BeginSetup(now)
+	case "room.pause":
+		err = r.State.Pause(now)
+	case "room.resume":
+		err = r.State.Resume(now)
+	case "room.stop":
+		err = r.State.Stop()
+	case "room.reset":
+		err = r.resetRoomLocked(ctx, now)
 	case "seat.select":
 		var payload struct {
 			Seat game.Seat `json:"seat"`
@@ -566,6 +601,9 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 			if persistErr := r.persistParticipantLocked(ctx, current); persistErr != nil {
 				r.State = before
 				r.Sequence = beforeSequence
+				r.MatchID = beforeMatchID
+				r.RematchReady = beforeRematchReady
+				r.SeenRequests = beforeSeenRequests
 				restoreParticipant(participant, beforeParticipant)
 				return fmt.Errorf("persist participant: %w", persistErr)
 			}
@@ -573,6 +611,9 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 		if persistErr := r.persistLocked(ctx, envelope.Type); persistErr != nil {
 			r.State = before
 			r.Sequence = beforeSequence
+			r.MatchID = beforeMatchID
+			r.RematchReady = beforeRematchReady
+			r.SeenRequests = beforeSeenRequests
 			restoreParticipant(participant, beforeParticipant)
 			return fmt.Errorf("persist command: %w", persistErr)
 		}
@@ -750,6 +791,54 @@ func (r *Room) resetRematchLocked(ctx context.Context, now time.Time) error {
 		participant.Ready = false
 		participant.Spectator = true
 	}
+	r.MatchID = newMatchID
+	r.Sequence = 0
+	r.RematchReady = map[game.Seat]bool{}
+	r.SeenRequests = map[string]map[string]bool{}
+	return nil
+}
+
+func (r *Room) resetRoomLocked(ctx context.Context, now time.Time) error {
+	if r.State.Phase == game.Setup || r.State.Phase == game.Playing {
+		if err := r.State.Stop(); err != nil {
+			return err
+		}
+		if err := r.persistLocked(ctx, "room.reset"); err != nil {
+			return err
+		}
+	}
+
+	opening := randomOpening()
+	newMatchID := r.MatchID
+	if r.State.Phase == game.Finished && r.DB != nil {
+		matchID, err := r.DB.CreateMatch(ctx, r.PersistentID, string(r.State.Mode), string(r.State.Clock), string(opening))
+		if err != nil {
+			return err
+		}
+		newMatchID = matchID
+	}
+	version := r.State.Version + 1
+	state := game.NewState(r.State.Mode, r.State.Clock, opening, now)
+	state.Version = version
+	for _, seat := range game.Seats {
+		player := r.State.Players[seat]
+		if player.Username == "" {
+			continue
+		}
+		state.Players[seat] = game.Player{Username: player.Username, Connected: player.Connected}
+		for node, piece := range game.DefaultDeployment(r.Board, seat) {
+			state.Pieces[node] = piece
+		}
+	}
+	for _, participant := range r.Participants {
+		participant.Ready = false
+		if participant.Seat.Valid() && !participant.Spectator {
+			continue
+		}
+		participant.Seat = ""
+		participant.Spectator = true
+	}
+	r.State = state
 	r.MatchID = newMatchID
 	r.Sequence = 0
 	r.RematchReady = map[game.Seat]bool{}

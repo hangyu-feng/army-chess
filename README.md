@@ -32,6 +32,11 @@ player can leave their seat and return to the spectator list, then take another
 open seat later if one is available. Only seated players can arrange pieces or
 submit game actions; spectators can watch and join when a seat opens.
 
+The room-control panel is available to every room member. It starts deployment
+once all four seats are filled, pauses or resumes an active match, stops a
+match, and resets the room to the lobby with the seated players and default
+deployments preserved.
+
 ## Production deployment on a VPS
 
 ### Requirements

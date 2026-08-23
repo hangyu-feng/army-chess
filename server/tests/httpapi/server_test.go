@@ -152,6 +152,33 @@ func TestHTTPRejectsMalformedJSONAndUnauthenticatedRoomAccess(t *testing.T) {
 	}
 }
 
+func TestClientRoutesServeTheAppAndOnlyEightCharacterPathsAreRooms(t *testing.T) {
+	static := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			t.Fatalf("static app path = %q, want /", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("index"))
+	})
+	app := httpapi.New(slog.Default(), (*persistence.DB)(nil), static)
+	for _, path := range []string{"/ABC1DEFG", "/replay/match-1", "/profile/baihua"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		app.Routes().ServeHTTP(response, request)
+		if response.Code != http.StatusOK || response.Body.String() != "index" {
+			t.Fatalf("%s response = %d %q", path, response.Code, response.Body.String())
+		}
+	}
+	for _, path := range []string{"/ABC1234", "/ABCDEFGH", "/2ABC3456"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		app.Routes().ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("invalid room path %s status = %d, want 404", path, response.Code)
+		}
+	}
+}
+
 func TestConfiguredPublicBaseURL(t *testing.T) {
 	t.Setenv("PUBLIC_BASE_URL", "https://chess.example.com/")
 	app := httpapi.New(slog.Default(), (*persistence.DB)(nil), nil)

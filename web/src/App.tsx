@@ -13,6 +13,7 @@ type View = {
   matchId?: string;
   version: number;
   phase: Phase;
+  paused?: boolean;
   mode: Mode;
   clock: Clock;
   turn?: Seat;
@@ -71,27 +72,66 @@ export function App() {
     api<AppConfig>("/api/config").then((data) => setBaseUrl(data.baseUrl?.trim() || window.location.origin)).catch(() => setBaseUrl(window.location.origin));
     api<{ username: string }>("/api/me").then((data) => setUser(data.username)).catch(() => undefined);
   }, []);
+  useEffect(() => {
+    if (roomCode) canonicalizeRoomLocation(roomCode);
+  }, [roomCode]);
   if (path.startsWith("/replay/")) return <ReplayScreen matchId={decodeURIComponent(path.slice("/replay/".length))} />;
   if (path.startsWith("/profile/")) return <ProfileScreen username={decodeURIComponent(path.slice("/profile/".length))} />;
   if (!user) return <SignIn onSignedIn={setUser} />;
   if (!roomCode) return <Home user={user} onRoom={(code) => { setError(""); setRoomCode(code); }} onSwitchUser={() => setUser(null)} onError={setError} error={error} />;
-  return <RoomScreen user={user} code={roomCode} baseUrl={baseUrl} onLeave={() => { clearRoomQuery(); setRoomCode(null); }} onError={setError} error={error} />;
+  return <RoomScreen user={user} code={roomCode} baseUrl={baseUrl} onLeave={() => { forgetRoomMembership(roomCode, user); clearRoomLocation(); setRoomCode(null); }} onError={setError} error={error} />;
 }
 
 function roomCodeFromLocation() {
-  const code = new URLSearchParams(window.location.search).get("room")?.trim().toUpperCase();
-  return code && /^[A-Z0-9]{8}$/.test(code) ? code : null;
+  if (/^\/(?:api|replay|profile)(?:\/|$)/.test(window.location.pathname)) return null;
+  const pathMatch = window.location.pathname.match(/^\/([^/]+)\/?$/);
+  const pathCode = pathMatch?.[1];
+  if (pathCode && isRoomCode(pathCode)) return pathCode.toUpperCase();
+  const queryCode = new URLSearchParams(window.location.search).get("room")?.trim();
+  return queryCode && isRoomCode(queryCode) ? queryCode.toUpperCase() : null;
 }
 
-function clearRoomQuery() {
+function isRoomCode(code: string) {
+  return /^[A-Za-z][A-Za-z0-9]{7}$/.test(code) && /[0-9]/.test(code);
+}
+
+function canonicalizeRoomLocation(code: string) {
   const url = new URL(window.location.href);
-  url.searchParams.delete("room");
+  if (url.pathname === `/${code}` && !url.search) return;
+  url.pathname = `/${code}`;
+  url.search = "";
   window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function clearRoomLocation() {
+  const url = new URL(window.location.href);
+  url.pathname = "/";
+  url.search = "";
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function roomMembershipKey(code: string, user: string) {
+  return `army-chess:room:${code}:${user}`;
+}
+
+function rememberRoomMembership(code: string, user: string) {
+  window.sessionStorage.setItem(roomMembershipKey(code, user), "joined");
+}
+
+function hasRoomMembership(code: string, user: string) {
+  return window.sessionStorage.getItem(roomMembershipKey(code, user)) === "joined";
+}
+
+function forgetRoomMembership(code: string, user: string) {
+  window.sessionStorage.removeItem(roomMembershipKey(code, user));
 }
 
 function roomShareURL(baseUrl: string, code: string) {
   const url = new URL(baseUrl || window.location.origin);
-  url.searchParams.set("room", code);
+  const basePath = url.pathname.replace(/\/+$/, "");
+  url.pathname = `${basePath}/${code}`;
+  url.search = "";
+  url.hash = "";
   return url.toString();
 }
 
@@ -155,11 +195,36 @@ function RoomScreen({ user, code, baseUrl, onLeave, onError, error }: { user: st
   const socketRef = useRef<WebSocket | null>(null);
   useEffect(() => {
     let alive = true;
-    api<Room>(`/api/rooms/${code}`).then((data) => { if (alive) setRoom(data); }).catch((err) => onError((err as Error).message));
-    return () => { alive = false; socketRef.current?.close(); };
+    let timedOut = false;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      if (alive) onError("读取房间超时，请检查房间链接或服务状态。");
+    }, 8000);
+    api<Room>(`/api/rooms/${code}`, { signal: controller.signal })
+      .then((data) => {
+        if (!alive) return;
+        setRoom(data);
+        if (!hasRoomMembership(code, user)) return;
+        return api<Room>(`/api/rooms/${code}/join`, { method: "POST", body: JSON.stringify({}) })
+          .then((joinedRoom) => {
+            if (!alive) return;
+            setRoom(joinedRoom);
+            setJoined(true);
+            connect();
+          })
+          .catch((err) => {
+            forgetRoomMembership(code, user);
+            if (alive) onError((err as Error).message);
+          });
+      })
+      .catch((err) => { if (alive && !timedOut && (err as Error).name !== "AbortError") onError((err as Error).message); })
+      .finally(() => window.clearTimeout(timeout));
+    return () => { alive = false; window.clearTimeout(timeout); controller.abort(); socketRef.current?.close(); };
   }, [code, onError]);
   async function join() {
-    try { const data = await api<Room>(`/api/rooms/${code}/join`, { method: "POST", body: JSON.stringify({}) }); setRoom(data); setJoined(true); connect(); }
+    try { const data = await api<Room>(`/api/rooms/${code}/join`, { method: "POST", body: JSON.stringify({}) }); rememberRoomMembership(code, user); setRoom(data); setJoined(true); connect(); }
     catch (err) { onError((err as Error).message); }
   }
   function connect() {
@@ -171,14 +236,21 @@ function RoomScreen({ user, code, baseUrl, onLeave, onError, error }: { user: st
     socket.onclose = () => { socketRef.current = null; };
   }
   function send(type: string, payload: unknown = {}) { socketRef.current?.send(JSON.stringify({ type, requestId: crypto.randomUUID(), payload })); }
-  if (!room) return <main className="page-shell"><div className="loading">正在读取房间…</div></main>;
+  if (!room) {
+    if (!error) return <main className="page-shell"><div className="loading">正在读取房间…</div></main>;
+    const loadError = error === "room not found" ? "房间不存在或已过期。" : error;
+    return <main className="page-shell"><section className="join-room-card room-load-error"><h1>无法读取房间</h1><p>{loadError}</p><button className="primary large" onClick={onLeave}>返回房间入口</button></section></main>;
+  }
   if (!joined) return <main className="page-shell"><header className="topbar"><button className="text-button" onClick={onLeave}>← 返回</button><span className="room-code">{code}</span><span className="user-chip">{user}</span></header><section className="join-room-card"><h1>进入房间</h1><p>当前阶段：{phaseLabel(room.phase)} · {room.participants.length} 人在线或已登记</p><button className="primary large" onClick={join}>进入</button><ShareRoom code={code} baseUrl={baseUrl} /></section></main>;
+  const mySeat = view ? seatFor(view, user) : undefined;
+  const setupMode = Boolean(view && !view.paused && (view.phase === "lobby" || view.phase === "setup"));
+  const roomStatus = view && (!setupMode || !mySeat) && view.phase !== "playing" ? "等待四席就绪" : null;
   return <main className="game-shell"><header className="topbar"><button className="text-button" onClick={onLeave}>← 退出房间</button><div className="room-code"><span>ROOM</span> {code}</div><span className="connection-dot">● 已连接</span></header>{error && <div className="toast error">{error}</div>}
-    {!view ? <div className="loading">正在建立实时连接…</div> : <div className="room-layout"><aside className="side-panel left"><RoomHeader room={room} view={view} /><SeatList view={view} user={user} send={send} /></aside><section className="board-panel"><Board view={view} user={user} send={send} /><GameActions view={view} user={user} send={send} /></section><aside className="side-panel right"><ShareRoom code={code} baseUrl={baseUrl} /><EventPanel view={view} /><RoomControls room={room} view={view} user={user} send={send} /></aside></div>}
+    {!view ? <div className="loading">正在建立实时连接…</div> : <div className="room-layout"><aside className="side-panel left"><RoomHeader view={view} status={roomStatus} /><SeatList view={view} user={user} send={send} /></aside><section className="board-panel"><GameActions view={view} user={user} send={send} /><Board view={view} user={user} send={send} /></section><aside className="side-panel right"><ShareRoom code={code} baseUrl={baseUrl} /><EventPanel view={view} /><RoomControlPanel view={view} send={send} /><RoomControls room={room} view={view} user={user} send={send} /></aside></div>}
   </main>;
 }
 
-function RoomHeader({ view }: { room: Room; view: View }) { return <div className="room-heading"><h1>{phaseLabel(view.phase)}</h1><p>{modeLabel(view.mode)} · {clockLabel(view.clock)} · 开局：{seatLabels[view.opening]}</p></div>; }
+function RoomHeader({ view, status }: { view: View; status: string | null }) { return <div className="room-heading"><h1>{view.paused ? "对局已暂停" : phaseLabel(view.phase)}</h1><p>{modeLabel(view.mode)} · {clockLabel(view.clock)} · 开局：{seatLabels[view.opening]}</p>{status && <p className="room-status">{status}</p>}</div>; }
 
 function ShareRoom({ code, baseUrl }: { code: string; baseUrl: string }) {
   const [copied, setCopied] = useState(false);
@@ -215,7 +287,7 @@ function SeatList({ view, user, send }: { view: View; user: string; send: (type:
 function Board({ view, user, send }: { view: View; user: string; send: (type: string, payload?: unknown) => void }) {
   const [selected, setSelected] = useState<string | null>(null);
   const mySeat = seatFor(view, user);
-  const setupMode = view.phase === "lobby" || view.phase === "setup";
+  const setupMode = !view.paused && (view.phase === "lobby" || view.phase === "setup");
   const [setupSelection, setSetupSelection] = useState<SetupSelection>(null);
   const [setupArrangement, setSetupArrangement] = useState<SetupArrangement | null>(null);
   const legal = useMemo(() => new Set((view.legalMoves ?? []).map((move) => move.replace("->", "|"))), [view.legalMoves]);
@@ -339,7 +411,8 @@ function Board({ view, user, send }: { view: View; user: string; send: (type: st
   const trayCount = setupArrangement?.tray.filter(Boolean).length ?? 0;
   const selectedPiece = setupSelection?.type === "board" ? setupArrangement?.pieces[setupSelection.node] : setupSelection?.type === "tray" ? setupArrangement?.tray[setupSelection.index] : undefined;
   const showSetupTray = setupMode && Boolean(mySeat);
-  return <div className="board-wrap"><div className="board-caption"><span>棋盘 · 四国 / 九宫</span><span>{setupMode && mySeat ? (trayCount > 0 ? `临时区还有 ${trayCount} 枚棋子待放回` : selectedPiece ? `已选择：${pieceLabels[selectedPiece.kind ?? ""] ?? "棋子"}，再选择位置` : "点击棋子选择；可放入右侧临时区") : view.phase === "playing" ? "选择棋子，再选择高亮目标" : "等待四席就绪"}</span></div><div className={`board-stage ${showSetupTray ? "with-setup-tray" : ""}`}><BoardCanvas board={boardDefinition} pieces={displayPieces} selected={selected ?? setupSelectedNode} targets={selected ? legal : undefined} onNodeClick={click} /><SetupTray visible={showSetupTray} pieces={setupArrangement?.tray ?? []} selected={setupSelectedTray} onSlotClick={clickSetupTray} /></div></div>;
+  const setupHint = setupMode && mySeat ? trayCount > 0 ? `临时区还有 ${trayCount} 枚棋子待放回` : selectedPiece ? `已选择：${pieceLabels[selectedPiece.kind ?? ""] ?? "棋子"}，再选择位置` : "点击棋子选择；可放入右侧临时区" : null;
+  return <div className="board-wrap">{setupHint && <div className="board-caption"><span>{setupHint}</span></div>}<div className={`board-stage ${showSetupTray ? "with-setup-tray" : ""}`}><BoardCanvas board={boardDefinition} pieces={displayPieces} selected={selected ?? setupSelectedNode} targets={selected ? legal : undefined} onNodeClick={click} /><SetupTray visible={showSetupTray} pieces={setupArrangement?.tray ?? []} selected={setupSelectedTray} onSlotClick={clickSetupTray} /></div></div>;
 }
 
 type BoardPiece = { id?: string; owner: Seat; kind?: string };
@@ -381,10 +454,20 @@ function GameActions({ view, user, send }: { view: View; user: string; send: (ty
   const mine = seatFor(view, user);
   const player = mine ? view.players[mine] : undefined;
   const canAct = Boolean(mine);
-  return <div className="game-actions"><div className="clock-card"><span>{view.phase === "setup" ? "部署倒计时" : view.phase === "playing" ? `轮到${seatLabels[view.turn ?? "north"]}` : "比赛状态"}</span><strong>{countdown === null ? "—" : `${String(Math.floor(countdown / 60)).padStart(2, "0")}:${String(countdown % 60).padStart(2, "0")}`}</strong></div>{view.phase === "setup" && canAct && <button className="primary" onClick={() => send("ready", { ready: !player?.ready })}>{player?.ready ? "取消准备" : "准备就绪"}</button>}{view.phase === "playing" && canAct && <><button className="secondary" onClick={() => send("draw.offer")}>提议和棋</button><button className="danger-button" onClick={() => send("resign")}>认输</button></>}{view.phase === "finished" && canAct && <button className="primary" onClick={() => send("rematch.ready", { ready: true })}>准备再来一局</button>}{view.drawOffer && view.drawOffer !== mine && canAct && <button className="primary" onClick={() => send("draw.respond", { accept: true })}>接受和棋</button>}</div>;
+  const yourTurn = view.phase === "playing" && !view.paused && canAct && view.turn === mine;
+  const urgent = yourTurn && countdown !== null && countdown <= 10;
+  const critical = yourTurn && countdown !== null && countdown <= 5;
+  return <div className="game-actions"><div className={`clock-card ${yourTurn ? "your-turn" : ""} ${yourTurn && mine ? `turn-${mine}` : ""} ${urgent ? "urgent" : ""} ${critical ? "critical" : ""}`} aria-live="polite"><span>{view.paused ? "对局已暂停" : yourTurn ? "你的回合" : view.phase === "setup" ? "部署倒计时" : view.phase === "playing" ? `轮到${seatLabels[view.turn ?? "north"]}` : "比赛状态"}</span><strong>{view.paused ? "暂停" : countdown === null ? "—" : `${String(Math.floor(countdown / 60)).padStart(2, "0")}:${String(countdown % 60).padStart(2, "0")}`}</strong></div>{view.phase === "setup" && !view.paused && canAct && <button className="primary" onClick={() => send("ready", { ready: !player?.ready })}>{player?.ready ? "取消准备" : "准备就绪"}</button>}{view.phase === "playing" && !view.paused && canAct && <><button className="secondary" onClick={() => send("draw.offer")}>提议和棋</button><button className="danger-button" onClick={() => send("resign")}>认输</button></>}{view.phase === "finished" && canAct && <button className="primary" onClick={() => send("rematch.ready", { ready: true })}>准备再来一局</button>}{view.drawOffer && view.drawOffer !== mine && !view.paused && canAct && <button className="primary" onClick={() => send("draw.respond", { accept: true })}>接受和棋</button>}</div>;
 }
 
-function EventPanel({ view }: { view: View }) { return <div className="event-panel"><div className="panel-heading"><h2>战况记录</h2></div>{view.lastMove ? <div className="event-card"><span className="event-tag">最近行动</span><strong>{seatLabels[view.lastMove.seat]} · {view.lastMove.from} → {view.lastMove.to}</strong><span>{combatLabel(view.lastMove.result)}</span></div> : <p className="empty-copy">对局事件会显示在这里。<br />所有时钟由服务端计时。</p>}{view.drawOffer && <div className="draw-banner">{seatLabels[view.drawOffer]}方提议和棋</div>}{view.result && <div className="result-banner"><span>比赛结束</span><strong>{view.result.outcome === "draw" ? "和棋" : `${teamLabel(view.result.team)} 获胜`}</strong><small>{view.result.reason}</small>{view.matchId && <a href={`/replay/${view.matchId}`}>查看完整回放 ↗</a>}</div>}</div>; }
+function EventPanel({ view }: { view: View }) { return <div className="event-panel"><div className="panel-heading"><h2>战况记录</h2></div>{view.lastMove ? <div className="event-card"><span className="event-tag">最近行动</span><strong>{seatLabels[view.lastMove.seat]} · {view.lastMove.from} → {view.lastMove.to}</strong><span>{combatLabel(view.lastMove.result)}</span></div> : <p className="empty-copy">对局事件会显示在这里。<br />所有时钟由服务端计时。</p>}{view.drawOffer && <div className="draw-banner">{seatLabels[view.drawOffer]}方提议和棋</div>}{view.result && <div className="result-banner"><span>比赛结束</span><strong>{view.result.outcome === "draw" ? "和棋" : view.result.outcome === "stopped" ? "对局已停止" : `${teamLabel(view.result.team)} 获胜`}</strong><small>{view.result.reason}</small>{view.matchId && <a href={`/replay/${view.matchId}`}>查看完整回放 ↗</a>}</div>}</div>; }
+
+function RoomControlPanel({ view, send }: { view: View; send: (type: string, payload?: unknown) => void }) {
+  const allSeatsFilled = seats.every((seat) => Boolean(view.players[seat]?.username));
+  const active = view.phase === "setup" || view.phase === "playing";
+  const canStop = active || view.paused;
+  return <div className="room-controls room-control-panel"><div className="panel-heading"><h2>房间控制</h2></div><button className="primary" disabled={view.phase !== "lobby" || !allSeatsFilled} onClick={() => send("room.start")}>{view.phase === "lobby" ? allSeatsFilled ? "开始部署" : "等待四名玩家入座" : "已开始"}</button><div className="room-control-row"><button className="secondary" disabled={view.phase !== "playing" || Boolean(view.paused)} onClick={() => send("room.pause")}>暂停对局</button><button className="secondary" disabled={!view.paused} onClick={() => send("room.resume")}>继续对局</button></div><div className="room-control-row"><button className="danger-button" disabled={!canStop} onClick={() => send("room.stop")}>停止对局</button><button className="secondary" disabled={view.phase === "lobby"} onClick={() => send("room.reset")}>重置房间</button></div><p className="fine-print">房间内所有成员都可以使用这些控制。</p></div>;
+}
 
 function RoomControls({ room, view, user, send }: { room: Room; view: View; user: string; send: (type: string, payload?: unknown) => void }) { const canChangeSettings = room.hostUsername === user; const spectatorCount = (view.participants ?? []).filter((participant) => participant.role === "spectator").length; return <div className="room-controls"><div className="panel-heading"><h2>房间设置</h2></div><label>信息模式<select value={view.mode} disabled={view.phase !== "lobby" || !canChangeSettings} onChange={(e) => send("settings.update", { mode: e.target.value as Mode, clock: view.clock })}><option value="four_dark">四暗</option><option value="double_visible">队友可见</option><option value="fully_visible">全明（玩家）</option></select></label><label>时钟<select value={view.clock} disabled={view.phase !== "lobby" || !canChangeSettings} onChange={(e) => send("settings.update", { mode: view.mode, clock: e.target.value as Clock })}><option value="fast">快速 · 20 秒</option><option value="standard">标准 · 60 秒</option><option value="relaxed">休闲 · 120 秒</option></select></label><p className="fine-print">{spectatorCount} / {room.spectatorCap} 位观众</p></div>; }
 

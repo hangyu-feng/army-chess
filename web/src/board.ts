@@ -33,6 +33,9 @@ function buildBoard(): BoardDefinition {
   const nodes: Record<string, BoardNode> = {};
   const edges: BoardEdge[] = [];
   const edgeKeys = new Set<string>();
+  const gridStep = 47;
+  const formationStart = 406;
+  const frontRow = 648;
 
   function addEdge(from: string, to: string, type: BoardEdgeType) {
     const key = [from, to].sort().join("|");
@@ -44,7 +47,7 @@ function buildBoard(): BoardDefinition {
   for (const seat of seats) {
     for (let row = 1; row <= 6; row += 1) {
       for (let col = 0; col < columns.length; col += 1) {
-        const [x, y] = rotate(seat, 410 + col * 45, 660 + (row - 1) * 45);
+        const [x, y] = rotate(seat, formationStart + col * gridStep, frontRow + (row - 1) * gridStep);
         const camp = (row === 2 || row === 4) && (col === 1 || col === 3) || row === 3 && col === 2;
         const headquarters = row === 6 && (col === 1 || col === 3);
         nodes[localID(seat, row, col)] = {

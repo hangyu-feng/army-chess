@@ -61,6 +61,90 @@ func TestRoomLifecycleStartsMatchAndAcceptsOpeningMove(t *testing.T) {
 	}
 }
 
+func TestGeneratedRoomCodesStartWithLetterAndContainDigit(t *testing.T) {
+	registry := rooms.NewRegistry(slog.Default(), nil)
+	for index := 0; index < 100; index++ {
+		room, err := registry.Create(context.Background(), fmt.Sprintf("host-%d", index), "host_user", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(room.Code) != 8 || (room.Code[0] < 'A' || room.Code[0] > 'Z') || !strings.ContainsAny(room.Code, "0123456789") {
+			t.Fatalf("generated invalid room code %q", room.Code)
+		}
+	}
+}
+
+func TestAllRoomMembersCanControlTheRoomLifecycle(t *testing.T) {
+	registry := rooms.NewRegistry(slog.Default(), nil)
+	room, err := registry.Create(context.Background(), "p-north", "north_user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, participant := range []struct {
+		id, username string
+	}{
+		{"p-east", "east_user"}, {"p-south", "south_user"}, {"p-west", "west_user"}, {"spectator", "spectator_user"},
+	} {
+		if err := room.Join(context.Background(), participant.id, participant.username, "", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index, seat := range game.Seats {
+		id := []string{"p-north", "p-east", "p-south", "p-west"}[index]
+		payload, _ := json.Marshal(map[string]any{"seat": seat})
+		if err := room.Handle(id, rooms.Envelope{Type: "seat.select", Payload: payload}, time.Now().UTC()); err != nil {
+			t.Fatalf("select %s: %v", seat, err)
+		}
+	}
+
+	if err := room.Handle("spectator", rooms.Envelope{Type: "room.start"}, time.Now().UTC()); err != nil {
+		t.Fatalf("spectator could not start deployment: %v", err)
+	}
+	if room.State.Phase != game.Setup {
+		t.Fatalf("room did not enter setup: %s", room.State.Phase)
+	}
+	for index, seat := range game.Seats {
+		id := []string{"p-north", "p-east", "p-south", "p-west"}[index]
+		payload := json.RawMessage(`{"ready":true}`)
+		if err := room.Handle(id, rooms.Envelope{Type: "ready", Payload: payload}, time.Now().UTC()); err != nil {
+			t.Fatalf("ready %s: %v", seat, err)
+		}
+	}
+	if room.State.Phase != game.Playing {
+		t.Fatalf("room did not enter play: %s", room.State.Phase)
+	}
+
+	if err := room.Handle("spectator", rooms.Envelope{Type: "room.pause"}, time.Now().UTC()); err != nil {
+		t.Fatalf("spectator could not pause: %v", err)
+	}
+	if !room.State.Paused {
+		t.Fatal("room was not paused")
+	}
+	if err := room.Handle("spectator", rooms.Envelope{Type: "room.resume"}, time.Now().UTC()); err != nil {
+		t.Fatalf("spectator could not resume: %v", err)
+	}
+	if room.State.Paused {
+		t.Fatal("room remained paused")
+	}
+	if err := room.Handle("spectator", rooms.Envelope{Type: "room.stop"}, time.Now().UTC()); err != nil {
+		t.Fatalf("spectator could not stop: %v", err)
+	}
+	if room.State.Phase != game.Finished || room.State.Result == nil || room.State.Result.Outcome != "stopped" {
+		t.Fatalf("room did not stop: phase=%s result=%#v", room.State.Phase, room.State.Result)
+	}
+	if err := room.Handle("spectator", rooms.Envelope{Type: "room.reset"}, time.Now().UTC()); err != nil {
+		t.Fatalf("spectator could not reset: %v", err)
+	}
+	if room.State.Phase != game.Lobby || len(room.State.Pieces) != 4*len(game.Inventory()) {
+		t.Fatalf("room did not reset to lobby: phase=%s pieces=%d", room.State.Phase, len(room.State.Pieces))
+	}
+	for _, seat := range game.Seats {
+		if room.State.Players[seat].Username == "" || !room.State.Players[seat].Connected {
+			t.Fatalf("seated player was not preserved after reset: seat=%s player=%#v", seat, room.State.Players[seat])
+		}
+	}
+}
+
 func TestSpectatorProjectionNeverContainsRanks(t *testing.T) {
 	registry := rooms.NewRegistry(slog.Default(), nil)
 	room, err := registry.Create(context.Background(), "host", "host_user", "")

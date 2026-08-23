@@ -22,3 +22,9 @@ from their latest canonical event payload and participants can reconnect using
 their persisted username session. A no-`DATABASE_URL` local run deliberately
 falls back to ephemeral sessions and rooms so the frontend and rules can be
 exercised without a database.
+
+Room lifecycle commands are authoritative server commands and are available to
+all room members, including spectators. A full lobby can be moved into setup;
+an active match can be paused and resumed without losing its remaining turn
+clock; stopping records a stopped result; and resetting returns the room to the
+lobby while preserving seated participants and restoring default deployments.

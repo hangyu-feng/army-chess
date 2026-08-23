@@ -20,54 +20,54 @@
   <!-- One country in its local orientation: row 1 is the front row. -->
   <defs>
   <g id="country-template">
-    <rect class="zone" x="-18" y="-18" width="216" height="261" />
+    <rect class="zone" x="-18" y="-18" width="224" height="271" />
     <g class="rail">
-      <path d="M0 0H180 M0 180H180" />
-      <path d="M0 0V180 M180 0V180" />
+      <path d="M0 0H188 M0 188H188" />
+      <path d="M0 0V188 M188 0V188" />
     </g>
     <g class="road">
-      <path d="M0 45H180 M0 90H180 M0 135H180 M0 225H180" />
-      <path d="M0 180V225 M180 180V225 M45 0V225 M90 0V225 M135 0V225" />
-      <path d="M0 0L45 45 M90 0L45 45 M180 0L135 45 M90 0L135 45" />
-      <path d="M0 90L45 45 M90 90L45 45 M180 90L135 45 M90 90L135 45" />
-      <path d="M0 90L45 135 M90 90L45 135 M180 90L135 135 M90 90L135 135" />
-      <path d="M0 180L45 135 M90 180L45 135 M180 180L135 135 M90 180L135 135" />
-      <path d="M45 45L90 90 M135 45L90 90 M45 135L90 90 M135 135L90 90" />
+      <path d="M0 47H188 M0 94H188 M0 141H188 M0 235H188" />
+      <path d="M0 188V235 M188 188V235 M47 0V235 M94 0V235 M141 0V235" />
+      <path d="M0 0L47 47 M94 0L47 47 M188 0L141 47 M94 0L141 47" />
+      <path d="M0 94L47 47 M94 94L47 47 M188 94L141 47 M94 94L141 47" />
+      <path d="M0 94L47 141 M94 94L47 141 M188 94L141 141 M94 94L141 141" />
+      <path d="M0 188L47 141 M94 188L47 141 M188 188L141 141 M94 188L141 141" />
+      <path d="M47 47L94 94 M141 47L94 94 M47 141L94 94 M141 141L94 94" />
     </g>
     <g>
       <!-- row 1 -->
-      <circle class="node" cx="0" cy="0" r="9" /><circle class="node" cx="45" cy="0" r="9" />
-      <circle class="node" cx="90" cy="0" r="9" /><circle class="node" cx="135" cy="0" r="9" />
-      <circle class="node" cx="180" cy="0" r="9" />
+      <circle class="node" cx="0" cy="0" r="9" /><circle class="node" cx="47" cy="0" r="9" />
+      <circle class="node" cx="94" cy="0" r="9" /><circle class="node" cx="141" cy="0" r="9" />
+      <circle class="node" cx="188" cy="0" r="9" />
       <!-- row 2 -->
-      <circle class="node" cx="0" cy="45" r="9" /><circle class="node camp" cx="45" cy="45" r="9" />
-      <circle class="node" cx="90" cy="45" r="9" /><circle class="node camp" cx="135" cy="45" r="9" />
-      <circle class="node" cx="180" cy="45" r="9" />
+      <circle class="node" cx="0" cy="47" r="9" /><circle class="node camp" cx="47" cy="47" r="9" />
+      <circle class="node" cx="94" cy="47" r="9" /><circle class="node camp" cx="141" cy="47" r="9" />
+      <circle class="node" cx="188" cy="47" r="9" />
       <!-- row 3 -->
-      <circle class="node" cx="0" cy="90" r="9" /><circle class="node" cx="45" cy="90" r="9" />
-      <circle class="node camp" cx="90" cy="90" r="9" /><circle class="node" cx="135" cy="90" r="9" />
-      <circle class="node" cx="180" cy="90" r="9" />
+      <circle class="node" cx="0" cy="94" r="9" /><circle class="node" cx="47" cy="94" r="9" />
+      <circle class="node camp" cx="94" cy="94" r="9" /><circle class="node" cx="141" cy="94" r="9" />
+      <circle class="node" cx="188" cy="94" r="9" />
       <!-- row 4 -->
-      <circle class="node" cx="0" cy="135" r="9" /><circle class="node camp" cx="45" cy="135" r="9" />
-      <circle class="node" cx="90" cy="135" r="9" /><circle class="node camp" cx="135" cy="135" r="9" />
-      <circle class="node" cx="180" cy="135" r="9" />
+      <circle class="node" cx="0" cy="141" r="9" /><circle class="node camp" cx="47" cy="141" r="9" />
+      <circle class="node" cx="94" cy="141" r="9" /><circle class="node camp" cx="141" cy="141" r="9" />
+      <circle class="node" cx="188" cy="141" r="9" />
       <!-- row 5 -->
-      <circle class="node" cx="0" cy="180" r="9" /><circle class="node" cx="45" cy="180" r="9" />
-      <circle class="node" cx="90" cy="180" r="9" /><circle class="node" cx="135" cy="180" r="9" />
-      <circle class="node" cx="180" cy="180" r="9" />
+      <circle class="node" cx="0" cy="188" r="9" /><circle class="node" cx="47" cy="188" r="9" />
+      <circle class="node" cx="94" cy="188" r="9" /><circle class="node" cx="141" cy="188" r="9" />
+      <circle class="node" cx="188" cy="188" r="9" />
       <!-- row 6 -->
-      <circle class="node" cx="0" cy="225" r="9" /><circle class="node hq" cx="45" cy="225" r="9" />
-      <circle class="node" cx="90" cy="225" r="9" /><circle class="node hq" cx="135" cy="225" r="9" />
-      <circle class="node" cx="180" cy="225" r="9" />
+      <circle class="node" cx="0" cy="235" r="9" /><circle class="node hq" cx="47" cy="235" r="9" />
+      <circle class="node" cx="94" cy="235" r="9" /><circle class="node hq" cx="141" cy="235" r="9" />
+      <circle class="node" cx="188" cy="235" r="9" />
     </g>
   </g>
   </defs>
 
   <!-- South: front row toward the nine-palace. Other zones are rotations of it. -->
-  <use href="#country-template" transform="translate(410 660)" />
-  <g transform="rotate(180 500 500)"><use href="#country-template" transform="translate(410 660)" /></g>
-  <g transform="rotate(-90 500 500)"><use href="#country-template" transform="translate(410 660)" /></g>
-  <g transform="rotate(90 500 500)"><use href="#country-template" transform="translate(410 660)" /></g>
+  <use href="#country-template" transform="translate(406 648)" />
+  <g transform="rotate(180 500 500)"><use href="#country-template" transform="translate(406 648)" /></g>
+  <g transform="rotate(-90 500 500)"><use href="#country-template" transform="translate(406 648)" /></g>
+  <g transform="rotate(90 500 500)"><use href="#country-template" transform="translate(406 648)" /></g>
 
   <!-- Nine-palace: every line in this 3x3 graph is railway. -->
   <g>
@@ -88,15 +88,15 @@
 
   <!-- Railway interfaces between the nine-palace and the four fronts. -->
   <g class="rail">
-    <path d="M410 410L410 340 M500 410V340 M590 410L590 340" />
-    <path d="M590 410L660 410 M590 500H660 M590 590L660 590" />
-    <path d="M590 590L590 660 M500 590V660 M410 590L410 660" />
-    <path d="M410 590L340 590 M410 500H340 M410 410L340 410" />
+    <path d="M410 410L406 352 M500 410V352 M590 410L594 352" />
+    <path d="M590 410L648 406 M590 500H648 M590 590L648 594" />
+    <path d="M590 590L594 648 M500 590V648 M410 590L406 648" />
+    <path d="M410 590L352 594 M410 500H352 M410 410L352 406" />
   </g>
 
   <!-- Railway links between neighboring country fronts. -->
   <g class="rail">
-    <path d="M590 340L660 410 M410 340L340 410 M660 590L590 660 M340 590L410 660" />
+    <path d="M594 352L648 406 M406 352L352 406 M648 594L594 648 M352 594L406 648" />
   </g>
 
   <text class="label" x="500" y="58">NORTH</text>

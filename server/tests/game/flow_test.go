@@ -37,6 +37,39 @@ func TestDefaultMatchCanStartAndAdvance(t *testing.T) {
 	}
 }
 
+func TestPauseResumeAndStopLifecycle(t *testing.T) {
+	now := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	state := game.NewState(game.FourDark, game.Standard, game.North, now)
+	for _, seat := range game.Seats {
+		state.Players[seat] = game.Player{Username: string(seat)}
+	}
+	state.Phase = game.Playing
+	state.Turn = game.North
+	state.Deadline = now.Add(45 * time.Second)
+
+	if err := state.Pause(now.Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if !state.Paused || !state.Deadline.IsZero() || state.PausedRemaining != 40*time.Second {
+		t.Fatalf("pause did not preserve the remaining clock: paused=%v deadline=%v remaining=%v", state.Paused, state.Deadline, state.PausedRemaining)
+	}
+	if state.Tick(game.NewBoard(), now.Add(60*time.Second)) {
+		t.Fatal("paused match clock advanced")
+	}
+	if err := state.Resume(now.Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if state.Paused || !state.Deadline.Equal(now.Add(50*time.Second)) {
+		t.Fatalf("resume did not restore the clock: paused=%v deadline=%v", state.Paused, state.Deadline)
+	}
+	if err := state.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if state.Phase != game.Finished || state.Result == nil || state.Result.Outcome != "stopped" {
+		t.Fatalf("stop did not finish the match: phase=%s result=%#v", state.Phase, state.Result)
+	}
+}
+
 func TestFlagCaptureEliminatesPlayerAndRevealsLocation(t *testing.T) {
 	board := game.NewBoard()
 	now := time.Now().UTC()

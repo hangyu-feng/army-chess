@@ -35,6 +35,7 @@ describe("login and home screens", () => {
     signedIn = false;
     fetchMock.mockClear();
     window.history.replaceState({}, "", "/");
+    window.sessionStorage.clear();
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
     globalThis.fetch = fetchMock as typeof fetch;
     container = document.createElement("div");
@@ -125,7 +126,9 @@ describe("login and home screens", () => {
     await waitFor(() => container.querySelector(".join-room-card") !== null);
 
     const link = container.querySelector("input[aria-label='房间分享链接']") as HTMLInputElement | null;
-    expect(link?.value).toBe("https://chess.example.test/?room=ABCD2345");
+    expect(window.location.pathname).toBe("/ABCD2345");
+    expect(window.location.search).toBe("");
+    expect(link?.value).toBe("https://chess.example.test/ABCD2345");
     expect(container.querySelector(".share-link")).toBeNull();
     expect(container.textContent).not.toContain("进入后默认在旁观席");
 
@@ -134,7 +137,7 @@ describe("login and home screens", () => {
       copyButton?.click();
       await Promise.resolve();
     });
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("https://chess.example.test/?room=ABCD2345");
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("https://chess.example.test/ABCD2345");
     expect(container.textContent).toContain("已复制");
   });
 });
@@ -183,6 +186,7 @@ describe("room board interactions", () => {
     if (path === "/api/config") return Promise.resolve(new Response(JSON.stringify({ baseUrl: "https://chess.example.test" }), { status: 200 }));
     if (path === "/api/me") return Promise.resolve(new Response(JSON.stringify({ username: "baihua" }), { status: 200 }));
     if (path === "/api/rooms/ABCD2345" || path === "/api/rooms/ABCD2345/join") return Promise.resolve(new Response(JSON.stringify(room), { status: 200 }));
+    if (path === "/api/rooms/MISSING1") return Promise.resolve(new Response(JSON.stringify({ error: "room not found" }), { status: 404 }));
     return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
   });
 
@@ -191,6 +195,7 @@ describe("room board interactions", () => {
     globalThis.WebSocket = TestWebSocket as unknown as typeof WebSocket;
     TestWebSocket.current = null;
     fetchMock.mockClear();
+    window.sessionStorage.clear();
     window.history.replaceState({}, "", "/?room=ABCD2345");
     globalThis.fetch = fetchMock as typeof fetch;
     container = document.createElement("div");
@@ -221,6 +226,58 @@ describe("room board interactions", () => {
     }
     throw new Error("condition was not met before timeout");
   }
+
+  it("offers a way back to the room entry page when a room cannot be loaded", async () => {
+    window.history.replaceState({}, "", "/?room=MISSING1");
+    await renderApp();
+    await waitFor(() => container.querySelector(".room-load-error") !== null);
+
+    expect(container.textContent).toContain("房间不存在或已过期");
+    const back = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "返回房间入口");
+    await act(async () => {
+      back?.click();
+      await Promise.resolve();
+    });
+    await waitFor(() => container.querySelector(".home-grid") !== null);
+    expect(window.location.search).toBe("");
+  });
+
+  it("restores a room from its canonical path after a refresh", async () => {
+    window.history.replaceState({}, "", "/ABCD2345");
+    window.sessionStorage.setItem("army-chess:room:ABCD2345:baihua", "joined");
+    await renderApp();
+    await waitFor(() => container.querySelector(".game-shell") !== null);
+
+    expect(fetchMock.mock.calls.some(([input, init]) => input === "/api/rooms/ABCD2345/join" && init?.method === "POST")).toBe(true);
+    expect(window.location.pathname).toBe("/ABCD2345");
+  });
+
+  it("normalizes legacy room query links to the canonical path", async () => {
+    window.history.replaceState({}, "", "/?room=ABCD2345");
+    await renderApp();
+    await waitFor(() => container.querySelector(".join-room-card") !== null);
+
+    expect(window.location.pathname).toBe("/ABCD2345");
+    expect(window.location.search).toBe("");
+  });
+
+  it("does not interpret non-eight-character paths as rooms", async () => {
+    window.history.replaceState({}, "", "/ABC1234");
+    await renderApp();
+    await waitFor(() => container.querySelector(".home-grid") !== null);
+
+    expect(fetchMock.mock.calls.some(([input]) => input === "/api/rooms/ABC1234")).toBe(false);
+  });
+
+  it("does not interpret room-shaped paths without a digit or with a leading digit as rooms", async () => {
+    for (const path of ["/ABCDEFGH", "/2ABC3456"]) {
+      window.history.replaceState({}, "", path);
+      await renderApp();
+      await waitFor(() => container.querySelector(".home-grid") !== null);
+      expect(fetchMock.mock.calls.some(([input]) => input === `/api/rooms/${path.slice(1)}`)).toBe(false);
+      act(() => root.unmount());
+    }
+  });
 
   it("renders the classic board and sends a lobby arrangement swap", async () => {
     await renderApp();
@@ -312,6 +369,50 @@ describe("room board interactions", () => {
     expect(message.payload.pieces["north-r1-1R"]).toMatchObject({ id: "north-1", kind: "company" });
   });
 
+  it("shows the lobby start control once all four seats are filled", async () => {
+    await renderApp();
+    await waitFor(() => container.querySelector(".join-room-card") !== null);
+    const join = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "进入");
+    await act(async () => {
+      join?.click();
+      await Promise.resolve();
+    });
+    await waitFor(() => TestWebSocket.current?.readyState === 1);
+
+    const baseView = {
+      version: 1,
+      phase: "lobby",
+      mode: "four_dark",
+      clock: "standard",
+      opening: "north",
+      pieces: {},
+      revealedFlags: {},
+    };
+    const players = {
+      north: { username: "north_user", ready: false, connected: true, eliminated: false, misses: 0 },
+      east: { username: "baihua", ready: false, connected: true, eliminated: false, misses: 0 },
+      south: { username: "south_user", ready: false, connected: true, eliminated: false, misses: 0 },
+      west: { username: "west_user", ready: false, connected: true, eliminated: false, misses: 0 },
+    };
+    const participants = [
+      { username: "north_user", seat: "north", role: "player", connected: true },
+      { username: "baihua", seat: "east", role: "player", connected: true, self: true },
+      { username: "south_user", seat: "south", role: "player", connected: true },
+      { username: "west_user", seat: "west", role: "player", connected: true },
+    ];
+    TestWebSocket.current?.emit({ type: "snapshot", payload: { ...baseView, players, participants } });
+    await waitFor(() => container.querySelector(".game-actions") !== null);
+
+    const startButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "开始部署") as HTMLButtonElement | undefined;
+    expect(startButton).toBeDefined();
+    expect(startButton?.disabled).toBe(false);
+    await act(async () => {
+      startButton?.click();
+      await Promise.resolve();
+    });
+    expect(JSON.parse(TestWebSocket.current?.sent.at(-1) ?? "{}")).toMatchObject({ type: "room.start" });
+  });
+
   it("lists every spectator and lets the current user take and leave a seat", async () => {
     await renderApp();
     await waitFor(() => container.querySelector(".join-room-card") !== null);
@@ -350,6 +451,10 @@ describe("room board interactions", () => {
       },
     });
     await waitFor(() => container.querySelectorAll(".spectator-row").length === 3);
+    expect(container.querySelector(".room-control-panel .panel-heading h2")?.textContent).toBe("房间控制");
+    expect(container.querySelector(".room-control-panel")?.textContent).toContain("房间内所有成员都可以使用这些控制");
+    const unavailableStart = Array.from(container.querySelectorAll(".room-control-panel button")).find((button) => button.textContent === "等待四名玩家入座") as HTMLButtonElement | undefined;
+    expect(unavailableStart?.disabled).toBe(true);
     const seatList = container.querySelector(".seat-list") as HTMLElement;
     expect(seatList.querySelector(".panel-heading h2")?.textContent).toBe("座位与队伍");
     expect(seatList.querySelector(".spectator-list .panel-heading h2")?.textContent).toBe("观众");
@@ -419,6 +524,97 @@ describe("room board interactions", () => {
     await waitFor(() => container.querySelectorAll(".spectator-row").length === 3);
     expect(seatList.querySelector(".spectator-list")?.textContent).toContain("baihua");
     expect(seatList.querySelector(".spectator-list")?.textContent).toContain("observer");
+  });
+
+  it("lets a spectator use the shared pause, resume, stop, and reset controls", async () => {
+    await renderApp();
+    await waitFor(() => container.querySelector(".join-room-card") !== null);
+    const join = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "进入");
+    await act(async () => {
+      join?.click();
+      await Promise.resolve();
+    });
+    await waitFor(() => TestWebSocket.current?.readyState === 1);
+
+    const players = {
+      north: { username: "north_user", ready: true, connected: true, eliminated: false, misses: 0 },
+      east: { username: "east_user", ready: true, connected: true, eliminated: false, misses: 0 },
+      south: { username: "south_user", ready: true, connected: true, eliminated: false, misses: 0 },
+      west: { username: "west_user", ready: true, connected: true, eliminated: false, misses: 0 },
+    };
+    const participants = [
+      { username: "baihua", role: "spectator", connected: true, self: true },
+      { username: "north_user", seat: "north", role: "player", connected: true },
+      { username: "east_user", seat: "east", role: "player", connected: true },
+      { username: "south_user", seat: "south", role: "player", connected: true },
+      { username: "west_user", seat: "west", role: "player", connected: true },
+    ];
+    const view = { version: 1, phase: "playing", mode: "four_dark", clock: "standard", opening: "north", players, participants, pieces: {}, revealedFlags: {} };
+    TestWebSocket.current?.emit({ type: "snapshot", payload: view });
+    await waitFor(() => container.querySelector(".room-control-panel") !== null);
+
+    const button = (label: string) => Array.from(container.querySelectorAll(".room-control-panel button")).find((candidate) => candidate.textContent === label) as HTMLButtonElement;
+    await act(async () => {
+      button("暂停对局").click();
+      await Promise.resolve();
+    });
+    expect(JSON.parse(TestWebSocket.current?.sent.at(-1) ?? "{}")).toMatchObject({ type: "room.pause" });
+
+    TestWebSocket.current?.emit({ type: "snapshot", payload: { ...view, version: 2, paused: true } });
+    await waitFor(() => button("继续对局")?.disabled === false);
+    await act(async () => {
+      button("继续对局").click();
+      await Promise.resolve();
+    });
+    expect(JSON.parse(TestWebSocket.current?.sent.at(-1) ?? "{}")).toMatchObject({ type: "room.resume" });
+
+    await act(async () => {
+      button("停止对局").click();
+      await Promise.resolve();
+    });
+    expect(JSON.parse(TestWebSocket.current?.sent.at(-1) ?? "{}")).toMatchObject({ type: "room.stop" });
+    TestWebSocket.current?.emit({ type: "snapshot", payload: { ...view, version: 3, phase: "finished", result: { outcome: "stopped", reason: "manual_stop" } } });
+    await waitFor(() => button("重置房间")?.disabled === false);
+    await act(async () => {
+      button("重置房间").click();
+      await Promise.resolve();
+    });
+    expect(JSON.parse(TestWebSocket.current?.sent.at(-1) ?? "{}")).toMatchObject({ type: "room.reset" });
+  });
+
+  it("keeps playable moves unhighlighted and marks the current player's turn", async () => {
+    await renderApp();
+    await waitFor(() => container.querySelector(".join-room-card") !== null);
+    const join = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "进入");
+    await act(async () => {
+      join?.click();
+      await Promise.resolve();
+    });
+    await waitFor(() => TestWebSocket.current?.readyState === 1);
+
+    TestWebSocket.current?.emit({
+      type: "snapshot",
+      payload: {
+        version: 1,
+        phase: "playing",
+        mode: "four_dark",
+        clock: "standard",
+        opening: "east",
+        turn: "east",
+        deadline: new Date(Date.now() + 45_000).toISOString(),
+        players: { east: { username: "baihua", ready: true, connected: true, eliminated: false, misses: 0 } },
+        participants: [{ username: "baihua", seat: "east", role: "player", connected: true, self: true }],
+        pieces: { "north-r1-1L": { id: "east-1", owner: "east", kind: "company" } },
+        legalMoves: ["north-r1-1L->north-r1-1R"],
+        revealedFlags: {},
+      },
+    });
+    await waitFor(() => container.querySelector('[aria-label^="north-r1-1L"]') !== null);
+
+    expect(container.querySelector('[aria-label^="north-r1-1L"]')?.classList.contains("playable")).toBe(false);
+    expect(container.querySelector(".clock-card.your-turn")).not.toBeNull();
+    expect(container.querySelector(".clock-card.your-turn.turn-east")).not.toBeNull();
+    expect(container.querySelector(".clock-card")?.textContent).toContain("你的回合");
   });
 
   it("returns from the room entry screen to username selection", async () => {

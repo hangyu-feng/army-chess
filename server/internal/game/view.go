@@ -26,6 +26,7 @@ type View struct {
 	MatchID       string                  `json:"matchId,omitempty"`
 	Version       int64                   `json:"version"`
 	Phase         Phase                   `json:"phase"`
+	Paused        bool                    `json:"paused,omitempty"`
 	Mode          VisibilityMode          `json:"mode"`
 	Clock         ClockPreset             `json:"clock"`
 	Turn          Seat                    `json:"turn,omitempty"`
@@ -46,6 +47,7 @@ func (s *State) Project(viewer Viewer, board *Board) View {
 	view := View{
 		Version:       s.Version,
 		Phase:         s.Phase,
+		Paused:        s.Paused,
 		Mode:          s.Mode,
 		Clock:         s.Clock,
 		Turn:          s.Turn,

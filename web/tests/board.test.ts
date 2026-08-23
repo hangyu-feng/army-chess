@@ -26,10 +26,10 @@ describe("classic Army Chess board", () => {
   });
 
   it("rotates each country zone around the shared center", () => {
-    expect(boardDefinition.nodes["north-r1-1L"]).toMatchObject({ x: 590, y: 340, deployFor: "north" });
-    expect(boardDefinition.nodes["east-r1-1L"]).toMatchObject({ x: 660, y: 590, deployFor: "east" });
-    expect(boardDefinition.nodes["south-r1-1L"]).toMatchObject({ x: 410, y: 660, deployFor: "south" });
-    expect(boardDefinition.nodes["west-r1-1L"]).toMatchObject({ x: 340, y: 410, deployFor: "west" });
+    expect(boardDefinition.nodes["north-r1-1L"]).toMatchObject({ x: 594, y: 352, deployFor: "north" });
+    expect(boardDefinition.nodes["east-r1-1L"]).toMatchObject({ x: 648, y: 594, deployFor: "east" });
+    expect(boardDefinition.nodes["south-r1-1L"]).toMatchObject({ x: 406, y: 648, deployFor: "south" });
+    expect(boardDefinition.nodes["west-r1-1L"]).toMatchObject({ x: 352, y: 406, deployFor: "west" });
   });
 
   it("connects the palace and the four outer rail corners", () => {

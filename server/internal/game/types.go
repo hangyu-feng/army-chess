@@ -170,22 +170,24 @@ type Result struct {
 }
 
 type State struct {
-	Version        int64            `json:"version"`
-	Phase          Phase            `json:"phase"`
-	Mode           VisibilityMode   `json:"mode"`
-	Clock          ClockPreset      `json:"clock"`
-	Opening        Seat             `json:"opening"`
-	Turn           Seat             `json:"turn"`
-	Deadline       time.Time        `json:"deadline,omitempty"`
-	SetupDeadline  time.Time        `json:"setupDeadline,omitempty"`
-	Players        map[Seat]Player  `json:"players"`
-	Pieces         map[string]Piece `json:"pieces"`
-	RevealedFlags  map[Seat]string  `json:"revealedFlags"`
-	NoCaptureMoves int              `json:"noCaptureMoves"`
-	DrawOffer      Seat             `json:"drawOffer,omitempty"`
-	DrawAccepts    map[Seat]bool    `json:"drawAccepts,omitempty"`
-	LastMove       *Move            `json:"lastMove,omitempty"`
-	Result         *Result          `json:"result,omitempty"`
+	Version         int64            `json:"version"`
+	Phase           Phase            `json:"phase"`
+	Paused          bool             `json:"paused,omitempty"`
+	PausedRemaining time.Duration    `json:"pausedRemaining,omitempty"`
+	Mode            VisibilityMode   `json:"mode"`
+	Clock           ClockPreset      `json:"clock"`
+	Opening         Seat             `json:"opening"`
+	Turn            Seat             `json:"turn"`
+	Deadline        time.Time        `json:"deadline,omitempty"`
+	SetupDeadline   time.Time        `json:"setupDeadline,omitempty"`
+	Players         map[Seat]Player  `json:"players"`
+	Pieces          map[string]Piece `json:"pieces"`
+	RevealedFlags   map[Seat]string  `json:"revealedFlags"`
+	NoCaptureMoves  int              `json:"noCaptureMoves"`
+	DrawOffer       Seat             `json:"drawOffer,omitempty"`
+	DrawAccepts     map[Seat]bool    `json:"drawAccepts,omitempty"`
+	LastMove        *Move            `json:"lastMove,omitempty"`
+	Result          *Result          `json:"result,omitempty"`
 }
 
 func NewState(mode VisibilityMode, clock ClockPreset, opening Seat, now time.Time) *State {

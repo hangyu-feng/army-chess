@@ -329,6 +329,9 @@ func backTwoRows(board *Board, seat Seat, nodeID string) bool {
 }
 
 func (s *State) Move(board *Board, seat Seat, from, to string, now time.Time) (string, error) {
+	if s.Paused {
+		return "", errors.New("match is paused")
+	}
 	if s.Phase != Playing {
 		return "", ErrNotPlaying
 	}
@@ -448,6 +451,9 @@ func (s *State) advanceTurnWithBoard(board *Board, now time.Time) {
 }
 
 func (s *State) Tick(board *Board, now time.Time) bool {
+	if s.Paused {
+		return false
+	}
 	if s.Phase == Setup && !s.SetupDeadline.IsZero() && !now.Before(s.SetupDeadline) {
 		for _, seat := range Seats {
 			player := s.Players[seat]
@@ -482,6 +488,9 @@ func (s *State) Tick(board *Board, now time.Time) bool {
 }
 
 func (s *State) Resign(board *Board, seat Seat, now time.Time) error {
+	if s.Paused {
+		return errors.New("match is paused")
+	}
 	if s.Phase != Playing || s.Players[seat].Eliminated {
 		return ErrNotPlaying
 	}
@@ -492,6 +501,9 @@ func (s *State) Resign(board *Board, seat Seat, now time.Time) error {
 }
 
 func (s *State) OfferDraw(seat Seat) error {
+	if s.Paused {
+		return errors.New("match is paused")
+	}
 	if s.Phase != Playing || s.Players[seat].Eliminated {
 		return ErrNotPlaying
 	}
@@ -505,6 +517,9 @@ func (s *State) OfferDraw(seat Seat) error {
 }
 
 func (s *State) RespondDraw(seat Seat, accept bool) error {
+	if s.Paused {
+		return errors.New("match is paused")
+	}
 	if s.DrawOffer == "" || s.Players[seat].Eliminated {
 		return errors.New("no draw offer is pending")
 	}
@@ -571,7 +586,10 @@ func (s *State) finish(outcome, reason string) {
 		return
 	}
 	s.Phase = Finished
+	s.Paused = false
+	s.PausedRemaining = 0
 	s.Deadline = time.Time{}
+	s.SetupDeadline = time.Time{}
 	s.Result = &Result{Outcome: outcome, Reason: reason}
 	if outcome == "win" {
 		s.Result.Team = reason

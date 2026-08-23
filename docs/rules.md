@@ -278,6 +278,11 @@ The following are application policies rather than traditional board rules:
 
 - the server is authoritative for the board, turn, combat, and clock;
 - a room starts only after all four seats submit valid deployments and ready;
+- any room member may begin deployment once all four seats are occupied;
+- any room member may pause or resume an active match, and pausing freezes the
+  server-side turn clock;
+- stopping records a stopped match, while resetting returns the room to lobby
+  and preserves seated participants with fresh default deployments;
 - the room may choose a turn clock and a deployment clock;
 - a missed turn may skip the player, and repeated missed deadlines may
   eliminate the player if the room enables that policy;

@@ -20,6 +20,7 @@ import (
 )
 
 var usernamePattern = regexp.MustCompile(`^[a-z][a-z_]{1,18}[a-z]$`)
+var roomCodePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{7}$`)
 
 type Session struct {
 	ID        string
@@ -73,10 +74,33 @@ func (s *Server) Routes() http.Handler {
 		r.Put("/layouts/{id}", s.requireSession(s.updateLayout))
 		r.Delete("/layouts/{id}", s.requireSession(s.deleteLayout))
 	})
+	r.Get("/{code}", s.roomApp)
+	r.Get("/replay/{id}", s.clientApp)
+	r.Get("/profile/{username}", s.clientApp)
 	if s.Static != nil {
 		r.Handle("/*", s.Static)
 	}
 	return r
+}
+
+func (s *Server) roomApp(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	if !roomCodePattern.MatchString(code) || !strings.ContainsAny(code, "0123456789") {
+		http.NotFound(w, r)
+		return
+	}
+	s.clientApp(w, r)
+}
+
+func (s *Server) clientApp(w http.ResponseWriter, r *http.Request) {
+	if s.Static == nil {
+		http.NotFound(w, r)
+		return
+	}
+	request := r.Clone(r.Context())
+	request.URL.Path = "/"
+	request.URL.RawPath = ""
+	s.Static.ServeHTTP(w, request)
 }
 
 func (s *Server) config(w http.ResponseWriter, r *http.Request) {

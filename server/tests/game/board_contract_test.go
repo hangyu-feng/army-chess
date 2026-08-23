@@ -105,10 +105,10 @@ func TestBoardHasNoDuplicateEdgesAndPreservesRailwayHeadings(t *testing.T) {
 func TestBoardRotatesLocalCountryCoordinates(t *testing.T) {
 	board := game.NewBoard()
 	expected := map[string][2]float64{
-		"north-r1-1L": {590, 340},
-		"east-r1-1L":  {660, 590},
-		"south-r1-1L": {410, 660},
-		"west-r1-1L":  {340, 410},
+		"north-r1-1L": {594, 352},
+		"east-r1-1L":  {648, 594},
+		"south-r1-1L": {406, 648},
+		"west-r1-1L":  {352, 406},
 	}
 	for id, want := range expected {
 		node, ok := board.Node(id)

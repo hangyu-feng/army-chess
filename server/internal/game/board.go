@@ -173,7 +173,7 @@ func NewBoard() *Board {
 }
 
 func localCoordinates(row, col int) (float64, float64) {
-	return 410 + float64(col)*45, 660 + float64(row-1)*45
+	return 406 + float64(col)*47, 648 + float64(row-1)*47
 }
 
 func rotateCoordinates(seat Seat, x, y float64) (float64, float64) {
