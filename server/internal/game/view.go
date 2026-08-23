@@ -56,7 +56,7 @@ func (s *State) Project(viewer Viewer, board *Board) View {
 	}
 	for node, piece := range s.Pieces {
 		visible := VisiblePiece{ID: piece.ID, Owner: piece.Owner}
-		if canSeeRank(s, viewer, piece.Owner) {
+		if canSeeRank(s, viewer, piece.Owner) || s.RevealedFlags[piece.Owner] == node {
 			visible.Kind = piece.Kind
 			visible.Revealed = true
 		}

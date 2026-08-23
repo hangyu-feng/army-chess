@@ -440,6 +440,8 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 		if err = json.Unmarshal(envelope.Payload, &payload); err == nil {
 			err = r.selectSeatLocked(participant, payload.Seat)
 		}
+	case "seat.leave":
+		err = r.leaveSeatLocked(participant)
 	case "settings.update":
 		if participant.ID != r.HostID {
 			err = errors.New("only the host may change room settings")
@@ -567,6 +569,34 @@ func (r *Room) selectSeatLocked(participant *Participant, seat game.Seat) error 
 	if len(r.deploymentLocked(seat)) == 0 {
 		for node, piece := range game.DefaultDeployment(r.Board, seat) {
 			r.State.Pieces[node] = piece
+		}
+	}
+	r.State.Version++
+	return nil
+}
+
+func (r *Room) leaveSeatLocked(participant *Participant) error {
+	if r.State.Phase != game.Lobby && r.State.Phase != game.Setup {
+		return errors.New("seats are closed")
+	}
+	if !participant.Seat.Valid() {
+		return errors.New("participant is not seated")
+	}
+	oldSeat := participant.Seat
+	participant.Seat = ""
+	participant.Ready = false
+	r.State.Players[oldSeat] = game.Player{}
+	for node, piece := range r.State.Pieces {
+		if piece.Owner == oldSeat {
+			delete(r.State.Pieces, node)
+		}
+	}
+	if r.State.Phase == game.Setup {
+		r.State.Phase = game.Lobby
+		r.State.SetupDeadline = time.Time{}
+		for seat, player := range r.State.Players {
+			player.Ready = false
+			r.State.Players[seat] = player
 		}
 	}
 	r.State.Version++

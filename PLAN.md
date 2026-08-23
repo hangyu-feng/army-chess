@@ -85,7 +85,7 @@ Deployment rules:
 
 - Model the board as versioned nodes and edges rather than deriving movement from pixels.
 - Node types are `station`, `camp`, and `headquarters`; edge types are `road` and `rail`.
-- Public board geometry lives in a shared `board.v1.json` contract containing stable node IDs, topology, and normalized rendering coordinates.
+- Public board geometry is defined by the classic `board.v2.json` contract and the matching board-layout reference, with stable node IDs and explicit topology.
 - On roads, a movable piece travels one adjacent edge.
 - On unobstructed railways, ordinary pieces may travel any distance on one continuous railway route but cannot turn at a right-angle junction.
 - Engineers may follow any connected, unobstructed railway path, including turns.
@@ -236,7 +236,8 @@ army_chess/
 ├── web/
 │   └── src/                   # React/Vite client
 ├── contracts/
-│   ├── board.v1.json
+│   ├── board.v1.json          # historical prototype contract
+│   ├── board.v2.json          # classic four-country topology
 │   ├── openapi.yaml
 │   └── realtime.schema.json
 ├── db/
@@ -363,8 +364,8 @@ Routes are `/`, `/room/:code`, `/profile/:username`, and `/replay/:matchId`.
 
 ### Phase 0 — Rules and contracts
 
-- [x] Write `docs/rules.md` with the executable v1 rules baseline, visibility modes, clocks, draws, and elimination behavior.
-- [x] Create and manually verify the generated v1 board contract in `board.v1.json`.
+- [x] Write `docs/rules.md` with the executable rules baseline, visibility modes, clocks, draws, and elimination behavior.
+- [x] Create and verify the classic board contract in `board.v2.json` and `docs/board-layout.svg`.
 - [x] Define engine commands, domain events, phases, seats, teams, visibility modes, and error codes.
 - [x] Draft OpenAPI and realtime schemas before handlers.
 - [ ] Produce low-fidelity wireframes for every screen and desktop/mobile game layouts.
@@ -382,7 +383,7 @@ Exit criteria: one command starts the stack, migrations complete automatically, 
 
 ### Phase 2 — Pure game engine
 
-- [x] Implement the v1 generated topology, deployment validation, legal movement, combat, turn order, timer handling, elimination, team victory, draws, and replayable events.
+- [x] Implement the board.v2 topology, deployment validation, legal movement, combat, turn order, timer handling, elimination, team victory, draws, and replayable events.
 - [x] Implement canonical state plus four player projections and the public spectator projection.
 - [x] Add persisted event reconstruction and ruleset/board version contracts; injected deterministic clocks and randomness remain follow-up work.
 - [ ] Use injected clock and randomness interfaces for deterministic tests.

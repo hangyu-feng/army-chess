@@ -6,7 +6,7 @@ test-go:
 	GOCACHE=$${TMPDIR:-/tmp}/army-chess-go-cache GOPATH=$${TMPDIR:-/tmp}/army-chess-gopath go test ./...
 
 test-web:
-	cd web && npm run build
+	cd web && npm test && npm run build
 
 build-image:
 	docker build -t army-chess:local .

@@ -1,4 +1,4 @@
-package httpapi
+package httpapi_test
 
 import (
 	"context"
@@ -15,11 +15,12 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/fenghangyu/army-chess/server/internal/game"
+	"github.com/fenghangyu/army-chess/server/internal/httpapi"
 	"github.com/fenghangyu/army-chess/server/internal/persistence"
 )
 
 func TestWebSocketSnapshotAndSeatCommand(t *testing.T) {
-	app := New(slog.New(slog.NewTextHandler(io.Discard, nil)), (*persistence.DB)(nil), nil)
+	app := httpapi.New(slog.New(slog.NewTextHandler(io.Discard, nil)), (*persistence.DB)(nil), nil)
 	server := httptest.NewServer(app.Routes())
 	defer server.Close()
 	jar, err := cookiejar.New(nil)
@@ -105,7 +106,7 @@ func TestWebSocketSnapshotAndSeatCommand(t *testing.T) {
 	if second.Type != "snapshot" || len(second.Payload.Pieces) != 25 {
 		t.Fatalf("seat snapshot: type=%s pieces=%d", second.Type, len(second.Payload.Pieces))
 	}
-	if second.Payload.Pieces["n00_00"].Kind != game.Flag {
+	if second.Payload.Pieces["north-r6-2L"].Kind != game.Flag {
 		t.Fatalf("owner projection did not include the flag rank")
 	}
 }

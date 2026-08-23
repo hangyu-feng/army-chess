@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" role="img" aria-labelledby="title desc">
+  <title id="title">四国军棋 standard board layout</title>
+  <desc id="desc">A top-down four-country Army Chess board with four 30-position zones, a nine-station central palace, camps, headquarters, road edges, and railway edges.</desc>
+  <style>
+    .board { fill: #fff; stroke: #222; stroke-width: 2; }
+    .zone { fill: #fafafa; stroke: #aaa; stroke-width: 1; }
+    .rail { stroke: #222; stroke-width: 3; fill: none; }
+    .road { stroke: #888; stroke-width: 1.5; fill: none; }
+    .node { fill: #fff; stroke: #222; stroke-width: 1.5; }
+    .camp { fill: #e8e8e8; }
+    .hq { fill: #f4df9b; }
+    .palace { fill: #f7f7f7; stroke: #222; stroke-width: 1.5; }
+    .label { fill: #222; font-family: sans-serif; font-size: 18px; font-weight: 600; text-anchor: middle; }
+    .small { fill: #555; font-family: sans-serif; font-size: 13px; text-anchor: middle; }
+    .node-label { fill: #333; font-family: sans-serif; font-size: 9px; text-anchor: middle; dominant-baseline: middle; }
+  </style>
+
+  <rect class="board" x="20" y="20" width="960" height="960" rx="2" />
+
+  <!-- One country in its local orientation: row 1 is the front row. -->
+  <defs>
+  <g id="country-template">
+    <rect class="zone" x="-18" y="-18" width="216" height="261" />
+    <g class="rail">
+      <path d="M0 0H180 M0 180H180" />
+      <path d="M0 0V180 M180 0V180" />
+    </g>
+    <g class="road">
+      <path d="M0 45H180 M0 90H180 M0 135H180 M0 225H180" />
+      <path d="M0 180V225 M180 180V225 M45 0V225 M90 0V225 M135 0V225" />
+      <path d="M0 0L45 45 M90 0L45 45 M180 0L135 45 M90 0L135 45" />
+      <path d="M0 90L45 45 M90 90L45 45 M180 90L135 45 M90 90L135 45" />
+      <path d="M0 90L45 135 M90 90L45 135 M180 90L135 135 M90 90L135 135" />
+      <path d="M0 180L45 135 M90 180L45 135 M180 180L135 135 M90 180L135 135" />
+      <path d="M45 45L90 90 M135 45L90 90 M45 135L90 90 M135 135L90 90" />
+    </g>
+    <g>
+      <!-- row 1 -->
+      <circle class="node" cx="0" cy="0" r="9" /><circle class="node" cx="45" cy="0" r="9" />
+      <circle class="node" cx="90" cy="0" r="9" /><circle class="node" cx="135" cy="0" r="9" />
+      <circle class="node" cx="180" cy="0" r="9" />
+      <!-- row 2 -->
+      <circle class="node" cx="0" cy="45" r="9" /><circle class="node camp" cx="45" cy="45" r="9" />
+      <circle class="node" cx="90" cy="45" r="9" /><circle class="node camp" cx="135" cy="45" r="9" />
+      <circle class="node" cx="180" cy="45" r="9" />
+      <!-- row 3 -->
+      <circle class="node" cx="0" cy="90" r="9" /><circle class="node" cx="45" cy="90" r="9" />
+      <circle class="node camp" cx="90" cy="90" r="9" /><circle class="node" cx="135" cy="90" r="9" />
+      <circle class="node" cx="180" cy="90" r="9" />
+      <!-- row 4 -->
+      <circle class="node" cx="0" cy="135" r="9" /><circle class="node camp" cx="45" cy="135" r="9" />
+      <circle class="node" cx="90" cy="135" r="9" /><circle class="node camp" cx="135" cy="135" r="9" />
+      <circle class="node" cx="180" cy="135" r="9" />
+      <!-- row 5 -->
+      <circle class="node" cx="0" cy="180" r="9" /><circle class="node" cx="45" cy="180" r="9" />
+      <circle class="node" cx="90" cy="180" r="9" /><circle class="node" cx="135" cy="180" r="9" />
+      <circle class="node" cx="180" cy="180" r="9" />
+      <!-- row 6 -->
+      <circle class="node" cx="0" cy="225" r="9" /><circle class="node hq" cx="45" cy="225" r="9" />
+      <circle class="node" cx="90" cy="225" r="9" /><circle class="node hq" cx="135" cy="225" r="9" />
+      <circle class="node" cx="180" cy="225" r="9" />
+    </g>
+  </g>
+  </defs>
+
+  <!-- South: front row toward the nine-palace. Other zones are rotations of it. -->
+  <use href="#country-template" transform="translate(410 660)" />
+  <g transform="rotate(180 500 500)"><use href="#country-template" transform="translate(410 660)" /></g>
+  <g transform="rotate(-90 500 500)"><use href="#country-template" transform="translate(410 660)" /></g>
+  <g transform="rotate(90 500 500)"><use href="#country-template" transform="translate(410 660)" /></g>
+
+  <!-- Nine-palace: every line in this 3x3 graph is railway. -->
+  <g>
+    <rect class="palace" x="410" y="410" width="180" height="180" />
+  </g>
+  <g class="rail">
+    <path d="M410 410H590 M410 500H590 M410 590H590" />
+    <path d="M410 410V590 M500 410V590 M590 410V590" />
+  </g>
+  <g>
+    <circle class="node" cx="410" cy="410" r="10" /><circle class="node" cx="500" cy="410" r="10" /><circle class="node" cx="590" cy="410" r="10" />
+    <circle class="node" cx="410" cy="500" r="10" /><circle class="node" cx="500" cy="500" r="10" /><circle class="node" cx="590" cy="500" r="10" />
+    <circle class="node" cx="410" cy="590" r="10" /><circle class="node" cx="500" cy="590" r="10" /><circle class="node" cx="590" cy="590" r="10" />
+    <text class="node-label" x="410" y="410">NW</text><text class="node-label" x="500" y="410">N</text><text class="node-label" x="590" y="410">NE</text>
+    <text class="node-label" x="410" y="500">W</text><text class="node-label" x="500" y="500">C</text><text class="node-label" x="590" y="500">E</text>
+    <text class="node-label" x="410" y="590">SW</text><text class="node-label" x="500" y="590">S</text><text class="node-label" x="590" y="590">SE</text>
+  </g>
+
+  <!-- Railway interfaces between the nine-palace and the four fronts. -->
+  <g class="rail">
+    <path d="M410 410L410 340 M500 410V340 M590 410L590 340" />
+    <path d="M590 410L660 410 M590 500H660 M590 590L660 590" />
+    <path d="M590 590L590 660 M500 590V660 M410 590L410 660" />
+    <path d="M410 590L340 590 M410 500H340 M410 410L340 410" />
+  </g>
+
+  <!-- Railway links between neighboring country fronts. -->
+  <g class="rail">
+    <path d="M590 340L660 410 M410 340L340 410 M660 590L590 660 M340 590L410 660" />
+  </g>
+
+  <text class="label" x="500" y="58">NORTH</text>
+  <text class="label" x="942" y="505">EAST</text>
+  <text class="label" x="500" y="947">SOUTH</text>
+  <text class="label" x="58" y="505">WEST</text>
+  <text class="small" x="500" y="388">nine-palace / 九宫</text>
+
+  <g transform="translate(80 965)">
+    <line class="rail" x1="0" y1="0" x2="42" y2="0" /><text class="small" x="68" y="5">railway</text>
+    <line class="road" x1="155" y1="0" x2="197" y2="0" /><text class="small" x="223" y="5">road</text>
+    <circle class="node camp" cx="310" cy="0" r="8" /><text class="small" x="350" y="5">camp</text>
+    <circle class="node hq" cx="430" cy="0" r="8" /><text class="small" x="465" y="5">HQ</text>
+  </g>
+</svg>

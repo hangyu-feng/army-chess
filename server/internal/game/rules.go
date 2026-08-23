@@ -237,71 +237,79 @@ func (s *State) legalDestinations(board *Board, from string, piece Piece) map[st
 	if node, ok := board.Node(from); ok && node.Type == Headquarters {
 		return result
 	}
+	if _, ok := board.Node(from); !ok {
+		return result
+	}
+
+	// Roads are always one edge. Railways can span an unobstructed route. An
+	// ordinary piece must keep the same heading at each railway junction;
+	// engineers may change heading and therefore can use the entire connected
+	// railway component.
+	type railState struct {
+		node    string
+		heading RailHeading
+	}
+	queue := []railState{}
+	seen := map[railState]bool{}
 	for _, edge := range board.Adj[from] {
-		if occupant, ok := s.Pieces[edge.To]; ok && occupant.Owner.Team() == piece.Owner.Team() {
+		if edge.Type == "road" {
+			if s.canLand(board, piece, edge.To) {
+				result[edge.To] = true
+			}
 			continue
 		}
-		if occupant, ok := s.Pieces[edge.To]; ok && board.Nodes[edge.To].Type == Camp && occupant.Owner != piece.Owner {
-			continue
-		}
-		if board.Nodes[edge.To].Type == Camp {
-			result[edge.To] = true
+		if !s.canLand(board, piece, edge.To) {
 			continue
 		}
 		result[edge.To] = true
-	}
-	// Engineers can use the full connected railway path, including turns.
-	if piece.Kind == Engineer {
-		queue := []string{from}
-		seen := map[string]bool{from: true}
-		for len(queue) > 0 {
-			current := queue[0]
-			queue = queue[1:]
-			for _, edge := range board.Adj[current] {
-				if edge.Type != "rail" || seen[edge.To] {
-					continue
-				}
-				if occupant, ok := s.Pieces[edge.To]; ok {
-					if occupant.Owner.Team() == piece.Owner.Team() {
-						continue
-					}
-					if board.Nodes[edge.To].Type != Camp {
-						result[edge.To] = true
-					}
-					continue
-				}
-				seen[edge.To] = true
-				queue = append(queue, edge.To)
-				result[edge.To] = true
+		if _, occupied := s.Pieces[edge.To]; !occupied {
+			state := railState{node: edge.To, heading: edge.RailwayTerminal}
+			if !seen[state] {
+				seen[state] = true
+				queue = append(queue, state)
 			}
 		}
-	} else {
-		fromNode, ok := board.Node(from)
-		if !ok {
-			return result
-		}
-		for _, direction := range [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
-			x, y := int(fromNode.X*float64(board.Width-1)), int(fromNode.Y*float64(board.Height-1))
-			for {
-				x += direction[0]
-				y += direction[1]
-				if x < 0 || y < 0 || x >= board.Width || y >= board.Height {
-					break
-				}
-				node := fmt.Sprintf("n%02d_%02d", x, y)
-				if occupant, ok := s.Pieces[node]; ok {
-					if occupant.Owner.Team() != piece.Owner.Team() && board.Nodes[node].Type != Camp {
-						result[node] = true
-					}
-					break
-				}
-				if board.Nodes[node].Type != Camp {
-					result[node] = true
-				}
+	}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, edge := range board.Adj[current.node] {
+			if edge.Type != "rail" {
+				continue
+			}
+			if piece.Kind != Engineer && current.heading != edge.RailwayOrigin {
+				continue
+			}
+			if !s.canLand(board, piece, edge.To) {
+				continue
+			}
+			result[edge.To] = true
+			if _, occupied := s.Pieces[edge.To]; occupied {
+				continue
+			}
+			state := railState{node: edge.To, heading: edge.RailwayTerminal}
+			if !seen[state] {
+				seen[state] = true
+				queue = append(queue, state)
 			}
 		}
 	}
 	return result
+}
+
+func (s *State) canLand(board *Board, piece Piece, nodeID string) bool {
+	node, ok := board.Node(nodeID)
+	if !ok {
+		return false
+	}
+	target, occupied := s.Pieces[nodeID]
+	if !occupied {
+		return true
+	}
+	if target.Owner.Team() == piece.Owner.Team() {
+		return false
+	}
+	return node.Type != Camp
 }
 
 func frontRow(board *Board, seat Seat, nodeID string) bool {
@@ -309,19 +317,7 @@ func frontRow(board *Board, seat Seat, nodeID string) bool {
 	if !ok {
 		return false
 	}
-	const edge = 0.0001
-	switch seat {
-	case North:
-		return node.Y >= 4.0/11.0-edge
-	case East:
-		return node.X <= 7.0/11.0+edge
-	case South:
-		return node.Y <= 7.0/11.0+edge
-	case West:
-		return node.X >= 4.0/11.0-edge
-	default:
-		return false
-	}
+	return node.DeployFor == seat && node.Row == 1
 }
 
 func backTwoRows(board *Board, seat Seat, nodeID string) bool {
@@ -329,19 +325,7 @@ func backTwoRows(board *Board, seat Seat, nodeID string) bool {
 	if !ok {
 		return false
 	}
-	const edge = 0.0001
-	switch seat {
-	case North:
-		return node.Y <= 1.0/11.0+edge
-	case East:
-		return node.X >= 10.0/11.0-edge
-	case South:
-		return node.Y >= 10.0/11.0-edge
-	case West:
-		return node.X <= 1.0/11.0+edge
-	default:
-		return false
-	}
+	return node.DeployFor == seat && node.Row >= 5
 }
 
 func (s *State) Move(board *Board, seat Seat, from, to string, now time.Time) (string, error) {

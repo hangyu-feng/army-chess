@@ -30,16 +30,24 @@ type Session struct {
 }
 
 type Server struct {
-	Logger   *slog.Logger
-	Rooms    *rooms.Registry
-	DB       *persistence.DB
-	Sessions map[string]*Session
-	Mu       sync.RWMutex
-	Static   http.Handler
+	Logger        *slog.Logger
+	Rooms         *rooms.Registry
+	DB            *persistence.DB
+	Sessions      map[string]*Session
+	Mu            sync.RWMutex
+	Static        http.Handler
+	PublicBaseURL string
 }
 
 func New(logger *slog.Logger, db *persistence.DB, static http.Handler) *Server {
-	return &Server{Logger: logger, DB: db, Rooms: rooms.NewRegistry(logger, db), Sessions: map[string]*Session{}, Static: static}
+	return &Server{
+		Logger:        logger,
+		DB:            db,
+		Rooms:         rooms.NewRegistry(logger, db),
+		Sessions:      map[string]*Session{},
+		Static:        static,
+		PublicBaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("PUBLIC_BASE_URL")), "/"),
+	}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -49,6 +57,7 @@ func (s *Server) Routes() http.Handler {
 	r.Get("/healthz", s.healthz)
 	r.Get("/readyz", s.readyz)
 	r.Route("/api", func(r chi.Router) {
+		r.Get("/config", s.config)
 		r.Post("/session", s.createSession)
 		r.Delete("/session", s.deleteSession)
 		r.Get("/me", s.me)
@@ -68,6 +77,21 @@ func (s *Server) Routes() http.Handler {
 		r.Handle("/*", s.Static)
 	}
 	return r
+}
+
+func (s *Server) config(w http.ResponseWriter, r *http.Request) {
+	baseURL := s.PublicBaseURL
+	if baseURL == "" {
+		scheme := r.Header.Get("X-Forwarded-Proto")
+		if scheme == "" {
+			scheme = "http"
+			if r.TLS != nil {
+				scheme = "https"
+			}
+		}
+		baseURL = scheme + "://" + r.Host
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"baseUrl": baseURL})
 }
 
 func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {

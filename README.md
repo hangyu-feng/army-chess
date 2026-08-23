@@ -17,7 +17,8 @@ The repository contains a deployable v1 vertical slice:
 - Versioned board and realtime/API contracts in [`contracts/`](contracts/).
 - Caddy HTTPS termination and Docker Compose orchestration.
 
-The executable rules baseline is documented in [docs/rules.md](docs/rules.md).
+The executable rules baseline is documented in [docs/rules.md](docs/rules.md),
+with the canonical board diagram in [docs/board-layout.md](docs/board-layout.md).
 The larger product roadmap and explicit non-goals are in [PLAN.md](PLAN.md).
 
 ## Production deployment on a VPS
@@ -66,6 +67,7 @@ Edit `deploy/.env` and set at least:
 
 ```dotenv
 DOMAIN=chess.example.com
+PUBLIC_BASE_URL=https://chess.example.com
 POSTGRES_PASSWORD=replace-with-a-long-random-password
 COOKIE_SECURE=true
 HTTP_PORT=80
@@ -140,6 +142,7 @@ Set these values in `deploy/.env`:
 
 ```dotenv
 DOMAIN=localhost
+PUBLIC_BASE_URL=https://localhost:8443
 POSTGRES_PASSWORD=local-development-password
 COOKIE_SECURE=false
 HTTP_PORT=8080
@@ -269,6 +272,10 @@ make compose-up
 make compose-down
 ```
 
+Tests are kept separate from production code: backend tests live under
+`server/tests/`, and frontend tests live under `web/tests/`. `make test` runs
+both suites and the frontend production build.
+
 ## Security notes
 
 - The database is not published as a host port.
@@ -284,6 +291,7 @@ make compose-down
 
 - [PLAN.md](PLAN.md): product specification and roadmap.
 - [docs/rules.md](docs/rules.md): executable v1 rules baseline.
+- [docs/board-layout.md](docs/board-layout.md): canonical board diagram, coordinates, and edge topology.
 - [docs/architecture.md](docs/architecture.md): runtime architecture.
 - [docs/operations.md](docs/operations.md): VPS operations reference.
 - [contracts/](contracts/): board, OpenAPI, and realtime contracts.
