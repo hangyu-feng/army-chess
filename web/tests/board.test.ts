@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardDefinition } from "../src/board";
+import { boardDefinition, boardForMatchMode, oneVsOneBoardDefinition } from "../src/board";
 
 describe("classic Army Chess board", () => {
   it("contains four 30-position zones and the nine-palace", () => {
@@ -42,5 +42,40 @@ describe("classic Army Chess board", () => {
     ]) {
       expect(edgeKeys.has(edge.slice().sort().join("|"))).toBe(true);
     }
+  });
+});
+
+describe("1v1 Army Chess board", () => {
+  it("uses the dedicated 5x13 topology instead of the four-country board", () => {
+    expect(boardForMatchMode("one_vs_one")).toBe(oneVsOneBoardDefinition);
+    expect(oneVsOneBoardDefinition.version).toBe("board.1v1");
+    expect(oneVsOneBoardDefinition.width).toBe(760);
+    expect(oneVsOneBoardDefinition.height).toBe(1260);
+    expect(Object.keys(oneVsOneBoardDefinition.nodes)).toHaveLength(65);
+    expect(Object.values(oneVsOneBoardDefinition.nodes).filter((node) => node.type === "frontline")).toHaveLength(3);
+    expect(Object.values(oneVsOneBoardDefinition.nodes).filter((node) => node.type === "mountain")).toHaveLength(2);
+    for (const seat of ["north", "south"] as const) {
+      const zone = Object.values(oneVsOneBoardDefinition.nodes).filter((node) => node.deployFor === seat);
+      expect(zone).toHaveLength(30);
+      expect(zone.filter((node) => node.type !== "camp")).toHaveLength(25);
+    }
+  });
+
+  it("has three separate cross-country railways and no mountain edges", () => {
+    const edgeKeys = new Set(oneVsOneBoardDefinition.edges.map((edge) => [edge.from, edge.to].sort().join("|")));
+    for (const edge of [
+      ["north-r1-1L", "frontline-1L"], ["frontline-1L", "south-r1-1L"],
+      ["north-r1-3", "frontline-3"], ["frontline-3", "south-r1-3"],
+      ["north-r1-1R", "frontline-1R"], ["frontline-1R", "south-r1-1R"],
+    ]) expect(edgeKeys.has(edge.slice().sort().join("|"))).toBe(true);
+    for (const mountain of ["mountain-2L", "mountain-2R"]) {
+      expect(oneVsOneBoardDefinition.edges.some((edge) => edge.from === mountain || edge.to === mountain)).toBe(false);
+    }
+    expect(oneVsOneBoardDefinition.edges).toHaveLength(130);
+  });
+
+  it("keeps the 2v2 board as the default", () => {
+    expect(boardForMatchMode("two_vs_two")).toBe(boardDefinition);
+    expect(boardForMatchMode()).toBe(boardDefinition);
   });
 });

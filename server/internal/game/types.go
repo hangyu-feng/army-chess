@@ -29,15 +29,22 @@ func (s Seat) Team() string {
 	return "east_west"
 }
 
+func (s Seat) TeamFor(mode MatchMode) string {
+	if mode == OneVsOne && (s == North || s == South) {
+		return string(s)
+	}
+	return s.Team()
+}
+
 func (s Seat) String() string { return string(s) }
 
-func nextSeat(from Seat, eliminated map[Seat]bool) Seat {
-	for i, seat := range Seats {
+func nextSeat(from Seat, eliminated map[Seat]bool, seats []Seat) Seat {
+	for i, seat := range seats {
 		if seat != from {
 			continue
 		}
-		for step := 1; step <= len(Seats); step++ {
-			candidate := Seats[(i+step)%len(Seats)]
+		for step := 1; step <= len(seats); step++ {
+			candidate := seats[(i+step)%len(seats)]
 			if !eliminated[candidate] {
 				return candidate
 			}
@@ -69,6 +76,33 @@ const (
 
 func (m VisibilityMode) Valid() bool {
 	return m == FourDark || m == DoubleVisible || m == FullyVisible
+}
+
+type MatchMode string
+
+const (
+	TwoVsTwo MatchMode = "two_vs_two"
+	OneVsOne MatchMode = "one_vs_one"
+)
+
+func (m MatchMode) Valid() bool {
+	return m == TwoVsTwo || m == OneVsOne
+}
+
+func (m MatchMode) Seats() []Seat {
+	if m == OneVsOne {
+		return []Seat{North, South}
+	}
+	return append([]Seat(nil), Seats...)
+}
+
+func (m MatchMode) AllowsSeat(seat Seat) bool {
+	for _, candidate := range m.Seats() {
+		if candidate == seat {
+			return true
+		}
+	}
+	return false
 }
 
 type ClockPreset string
@@ -174,6 +208,7 @@ type State struct {
 	Phase           Phase            `json:"phase"`
 	Paused          bool             `json:"paused,omitempty"`
 	PausedRemaining time.Duration    `json:"pausedRemaining,omitempty"`
+	MatchMode       MatchMode        `json:"matchMode"`
 	Mode            VisibilityMode   `json:"mode"`
 	Clock           ClockPreset      `json:"clock"`
 	Opening         Seat             `json:"opening"`
@@ -191,12 +226,23 @@ type State struct {
 }
 
 func NewState(mode VisibilityMode, clock ClockPreset, opening Seat, now time.Time) *State {
+	return NewStateWithMatchMode(TwoVsTwo, mode, clock, opening, now)
+}
+
+func NewStateWithMatchMode(matchMode MatchMode, mode VisibilityMode, clock ClockPreset, opening Seat, now time.Time) *State {
+	if !matchMode.Valid() {
+		matchMode = TwoVsTwo
+	}
 	if !opening.Valid() {
 		opening = North
+	}
+	if !matchMode.AllowsSeat(opening) {
+		opening = matchMode.Seats()[0]
 	}
 	s := &State{
 		Version:       1,
 		Phase:         Lobby,
+		MatchMode:     matchMode,
 		Mode:          mode,
 		Clock:         clock,
 		Opening:       opening,
@@ -241,13 +287,25 @@ func (s *State) Clone() *State {
 }
 
 func (s *State) ActiveSeats() []Seat {
-	active := make([]Seat, 0, 4)
-	for _, seat := range Seats {
+	active := make([]Seat, 0, len(s.RequiredSeats()))
+	for _, seat := range s.RequiredSeats() {
 		if !s.Players[seat].Eliminated {
 			active = append(active, seat)
 		}
 	}
 	return active
+}
+
+func (s *State) RequiredSeats() []Seat {
+	return s.MatchMode.Seats()
+}
+
+func (s *State) SeatEnabled(seat Seat) bool {
+	return s.MatchMode.AllowsSeat(seat)
+}
+
+func (s *State) Team(seat Seat) string {
+	return seat.TeamFor(s.MatchMode)
 }
 
 func (s *State) Validate() error {
@@ -256,6 +314,9 @@ func (s *State) Validate() error {
 	}
 	if !s.Mode.Valid() {
 		return errors.New("invalid visibility mode")
+	}
+	if !s.MatchMode.Valid() {
+		return errors.New("invalid match mode")
 	}
 	if !s.Clock.Valid() {
 		return errors.New("invalid clock preset")

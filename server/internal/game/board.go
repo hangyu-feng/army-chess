@@ -8,6 +8,8 @@ const (
 	Station      NodeType = "station"
 	Camp         NodeType = "camp"
 	Headquarters NodeType = "headquarters"
+	Frontline    NodeType = "frontline"
+	Mountain     NodeType = "mountain"
 )
 
 type Node struct {
@@ -65,6 +67,21 @@ type localPosition struct {
 // are drawing coordinates in a 1000x1000 view box; movement is determined only
 // by the explicit graph below.
 func NewBoard() *Board {
+	return newFourCountryBoard()
+}
+
+// NewBoardForMode returns the board topology that matches a match mode. The
+// 1v1 board is not a four-country board with two seats disabled: it is the
+// traditional two-country 5x13 layout with three frontlines and two
+// impassable mountains.
+func NewBoardForMode(mode MatchMode) *Board {
+	if mode == OneVsOne {
+		return newOneVsOneBoard()
+	}
+	return NewBoard()
+}
+
+func newFourCountryBoard() *Board {
 	b := &Board{
 		Version: "board.v2",
 		Width:   1000,
@@ -169,6 +186,98 @@ func NewBoard() *Board {
 	b.addBentRail(localNodeID(North, 1, 4), localNodeID(West, 1, 0), RailSouth, RailWest)
 	b.addBentRail(localNodeID(West, 1, 4), localNodeID(South, 1, 0), RailEast, RailSouth)
 
+	return b
+}
+
+func newOneVsOneBoard() *Board {
+	b := &Board{
+		Version: "board.1v1",
+		Width:   760,
+		Height:  1260,
+		Nodes:   map[string]Node{},
+		Adj:     map[string][]Edge{},
+	}
+
+	columns := []string{"1L", "2L", "3", "2R", "1R"}
+	addZone := func(seat Seat, startY float64) {
+		for row := 1; row <= 6; row++ {
+			for col, column := range columns {
+				x := 100 + float64(col)*140
+				y := startY + float64(row-1)*75
+				nodeType := Station
+				switch {
+				case (row == 2 || row == 4) && (col == 1 || col == 3), row == 3 && col == 2:
+					nodeType = Camp
+				case row == 6 && (col == 1 || col == 3):
+					nodeType = Headquarters
+				}
+				id := localNodeID(seat, row, col)
+				b.Nodes[id] = Node{ID: id, X: x, Y: y, Type: nodeType, DeployFor: seat, Row: row, Column: column}
+			}
+		}
+
+		for _, row := range []int{2, 3, 4, 6} {
+			for col := 0; col < 4; col++ {
+				b.addRoad(localNodeID(seat, row, col), localNodeID(seat, row, col+1))
+			}
+		}
+		for _, col := range []int{1, 2, 3} {
+			for row := 2; row < 6; row++ {
+				b.addRoad(localNodeID(seat, row, col), localNodeID(seat, row+1, col))
+			}
+		}
+		for _, col := range []int{0, 4} {
+			b.addRoad(localNodeID(seat, 5, col), localNodeID(seat, 6, col))
+		}
+		for _, row := range []int{1, 5} {
+			for col := 0; col < 4; col++ {
+				b.addRailBetween(localNodeID(seat, row, col), localNodeID(seat, row, col+1))
+			}
+		}
+		for _, col := range []int{0, 4} {
+			for row := 1; row < 5; row++ {
+				b.addRailBetween(localNodeID(seat, row, col), localNodeID(seat, row+1, col))
+			}
+		}
+
+		for _, camp := range []localPosition{{2, 1}, {2, 3}, {3, 2}, {4, 1}, {4, 3}} {
+			for _, diagonal := range []localPosition{
+				{camp.row - 1, camp.col - 1}, {camp.row - 1, camp.col + 1},
+				{camp.row + 1, camp.col - 1}, {camp.row + 1, camp.col + 1},
+			} {
+				b.addRoad(localNodeID(seat, camp.row, camp.col), localNodeID(seat, diagonal.row, diagonal.col))
+			}
+		}
+	}
+
+	// Row 1 is the front row for both players. The larger gap around the
+	// central band is intentional: it represents the two mountains and the
+	// three separate railway frontlines without making the mountains nodes.
+	addZone(North, 100)
+	addZone(South, 785)
+
+	central := []struct {
+		id       string
+		x        float64
+		nodeType NodeType
+	}{
+		{id: "frontline-1L", x: 100, nodeType: Frontline},
+		{id: "mountain-2L", x: 240, nodeType: Mountain},
+		{id: "frontline-3", x: 380, nodeType: Frontline},
+		{id: "mountain-2R", x: 520, nodeType: Mountain},
+		{id: "frontline-1R", x: 660, nodeType: Frontline},
+	}
+	for _, node := range central {
+		b.Nodes[node.id] = Node{ID: node.id, X: node.x, Y: 630, Type: node.nodeType, Row: 0, Column: node.id}
+	}
+	for _, link := range []struct{ top, frontline, bottom string }{
+		{"north-r1-1L", "frontline-1L", "south-r1-1L"},
+		{"north-r1-3", "frontline-3", "south-r1-3"},
+		{"north-r1-1R", "frontline-1R", "south-r1-1R"},
+	} {
+		b.addRailBetween(link.top, link.frontline)
+		b.addRailBetween(link.frontline, link.bottom)
+	}
 	return b
 }
 

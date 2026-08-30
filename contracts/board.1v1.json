@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Army Chess Board 1v1",
+  "version": "board.1v1",
+  "width": 760,
+  "height": 1260,
+  "coordinateSystem": "drawing-origin-top-left",
+  "nodeIdPattern": "(north|south)-r[1-6]-(1L|2L|3|2R|1R)|frontline-(1L|3|1R)|mountain-(2L|2R)",
+  "countryZone": {
+    "rows": 6,
+    "columns": ["1L", "2L", "3", "2R", "1R"],
+    "positions": 30,
+    "deployablePositions": 25,
+    "camps": ["r2-2L", "r2-2R", "r3-3", "r4-2L", "r4-2R"],
+    "headquarters": ["r6-2L", "r6-2R"]
+  },
+  "centralBand": {
+    "positions": ["frontline-1L", "mountain-2L", "frontline-3", "mountain-2R", "frontline-1R"],
+    "frontlines": ["frontline-1L", "frontline-3", "frontline-1R"],
+    "mountains": ["mountain-2L", "mountain-2R"],
+    "mountainsOccupiable": false
+  },
+  "topology": {
+    "edgeTypes": ["road", "rail"],
+    "roadMove": "one-adjacent-edge",
+    "railMove": "unobstructed-straight-route",
+    "engineerRailMove": "unobstructed-connected-route",
+    "frontlineRailways": 3,
+    "railwayHeading": "directed-origin-and-terminal-heading"
+  }
+}

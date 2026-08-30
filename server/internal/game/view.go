@@ -27,6 +27,7 @@ type View struct {
 	Version       int64                   `json:"version"`
 	Phase         Phase                   `json:"phase"`
 	Paused        bool                    `json:"paused,omitempty"`
+	MatchMode     MatchMode               `json:"matchMode"`
 	Mode          VisibilityMode          `json:"mode"`
 	Clock         ClockPreset             `json:"clock"`
 	Turn          Seat                    `json:"turn,omitempty"`
@@ -48,6 +49,7 @@ func (s *State) Project(viewer Viewer, board *Board) View {
 		Version:       s.Version,
 		Phase:         s.Phase,
 		Paused:        s.Paused,
+		MatchMode:     s.MatchMode,
 		Mode:          s.Mode,
 		Clock:         s.Clock,
 		Turn:          s.Turn,
@@ -98,5 +100,5 @@ func canSeeRank(s *State, viewer Viewer, owner Seat) bool {
 	if viewer.Seat == owner {
 		return true
 	}
-	return s.Mode == DoubleVisible && viewer.Seat.Team() == owner.Team()
+	return s.Mode == DoubleVisible && s.Team(viewer.Seat) == s.Team(owner)
 }

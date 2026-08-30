@@ -84,13 +84,18 @@ a { color: inherit; }
 
 .game-shell { min-height: 100vh; padding: 0 24px 24px; }
 .game-shell .topbar { width: min(100%, 1440px); margin: 0 auto; }
-.connection-dot { color: #86c5a8; font-size: 12px; }
-.room-layout { width: min(100%, 1440px); margin: 28px auto 0; display: grid; grid-template-columns: 240px minmax(480px, 760px) 260px; gap: 24px; align-items: start; }
+.connection-status { font-size: 12px; }
+.connection-status.connected { color: #86c5a8; }
+.connection-status.connecting { color: var(--muted); }
+.connection-status.error, .connection-status.disconnected { color: #e29a8d; }
+.room-layout { width: min(100%, 1440px); margin: 28px auto 0; display: grid; grid-template-columns: 260px minmax(560px, 1fr) 280px; gap: 24px; align-items: start; }
 .side-panel { display: grid; gap: 20px; min-width: 0; }
 .room-heading { padding: 3px 0 16px; border-bottom: 1px solid var(--line); }
 .room-heading h1 { margin: 0 0 7px; font-size: 21px; font-weight: 500; }
 .room-heading p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .room-heading .room-status { margin-top: 5px; }
+.room-status-actions { margin: 14px 0 0; }
+.room-status-actions .clock-card { width: 100%; min-width: 0; }
 .seat-list, .event-panel, .room-controls, .share-card { border: 1px solid var(--line); background: var(--surface); padding: 16px; }
 .side-panel .share-card { margin-top: 0; }
 .seat-list .panel-heading, .event-panel .panel-heading, .room-controls .panel-heading { margin-bottom: 12px; }
@@ -126,12 +131,16 @@ a { color: inherit; }
 .board-stage { display: block; }
 .board-stage.with-setup-tray { position: relative; }
 .board-svg { display: block; width: 100%; aspect-ratio: 1; border: 1px solid var(--line); background: #1b1d1f; }
+.board-svg.board-1v1 { aspect-ratio: 1; }
 .board-edge { fill: none; vector-effect: non-scaling-stroke; }
 .board-edge.rail { stroke: #8e969d; stroke-width: 4; stroke-linecap: square; }
 .board-edge.road { stroke: #4d555b; stroke-width: 2; }
 .board-node { outline: none; }
 .board-node[tabindex="0"] { cursor: pointer; }
 .board-node .board-slot { fill: #24282b; stroke: #747c82; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.board-node.frontline .board-slot { fill: #30363a; stroke: var(--accent); }
+.board-node.mountain .board-slot { fill: #151719; stroke: #52595e; stroke-dasharray: 5 4; }
+.board-node.mountain { cursor: default; }
 .board-node.camp .board-slot { fill: #30363a; stroke: var(--accent); }
 .board-node.headquarters .board-slot { fill: #30363a; stroke: var(--accent); }
 .board-node.occupied.north .board-slot { fill: #4a3433; stroke: var(--north); }

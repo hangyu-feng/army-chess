@@ -11,7 +11,7 @@ func (s *State) BeginSetup(now time.Time) error {
 	if s.Phase != Lobby {
 		return errors.New("deployment has already started")
 	}
-	for _, seat := range Seats {
+	for _, seat := range s.RequiredSeats() {
 		if s.Players[seat].Username == "" {
 			return ErrNotReady
 		}

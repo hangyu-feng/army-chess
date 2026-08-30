@@ -173,6 +173,11 @@ class TestWebSocket {
     this.readyState = 3;
     this.onclose?.();
   }
+
+  fail() {
+    this.onerror?.();
+    this.close();
+  }
 }
 
 describe("room board interactions", () => {
@@ -615,6 +620,74 @@ describe("room board interactions", () => {
     expect(container.querySelector(".clock-card.your-turn")).not.toBeNull();
     expect(container.querySelector(".clock-card.your-turn.turn-east")).not.toBeNull();
     expect(container.querySelector(".clock-card")?.textContent).toContain("你的回合");
+  });
+
+  it("renders the 1v1 seat set and lets any room member change match mode", async () => {
+    await renderApp();
+    await waitFor(() => container.querySelector(".join-room-card") !== null);
+    const join = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "进入");
+    await act(async () => {
+      join?.click();
+      await Promise.resolve();
+    });
+    await waitFor(() => TestWebSocket.current?.readyState === 1);
+
+    TestWebSocket.current?.emit({
+      type: "snapshot",
+      payload: {
+        version: 1,
+        phase: "lobby",
+        matchMode: "one_vs_one",
+        mode: "four_dark",
+        clock: "standard",
+        opening: "north",
+        players: {
+          north: { username: "north_user", ready: false, connected: true, eliminated: false, misses: 0 },
+          south: { username: "", ready: false, connected: false, eliminated: false, misses: 0 },
+        },
+        participants: [{ username: "baihua", role: "spectator", connected: true, self: true }],
+        pieces: {},
+        revealedFlags: {},
+      },
+    });
+    await waitFor(() => container.querySelector(".room-control-panel") !== null);
+
+    expect(container.querySelectorAll(".seat-row")).toHaveLength(2);
+    expect(container.querySelector(".seat-badge.east")).toBeNull();
+    expect(container.querySelector("svg.board-svg.board-1v1")).not.toBeNull();
+    expect(container.querySelector("svg.board-svg")?.getAttribute("viewBox")).toBe("0 0 760 1260");
+    expect(container.querySelectorAll("rect.board-slot")).toHaveLength(65);
+    expect(container.querySelectorAll(".board-node.frontline")).toHaveLength(3);
+    expect(container.querySelectorAll(".board-node.mountain")).toHaveLength(2);
+    expect(container.textContent).toContain("等待两名玩家入座");
+    expect(container.querySelector(".left .clock-card")).not.toBeNull();
+    expect(container.querySelector(".board-panel .clock-card")).toBeNull();
+
+    const matchMode = container.querySelector("select") as HTMLSelectElement;
+    expect(matchMode.value).toBe("one_vs_one");
+    expect(matchMode.disabled).toBe(false);
+    await act(async () => {
+      matchMode.value = "two_vs_two";
+      matchMode.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(JSON.parse(TestWebSocket.current?.sent.at(-1) ?? "{}")).toMatchObject({ type: "room.mode", payload: { matchMode: "two_vs_two" } });
+  });
+
+  it("shows realtime connection failure inline instead of as a popup", async () => {
+    await renderApp();
+    await waitFor(() => container.querySelector(".join-room-card") !== null);
+    const join = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "进入");
+    await act(async () => {
+      join?.click();
+      await Promise.resolve();
+    });
+    await waitFor(() => TestWebSocket.current?.readyState === 1);
+    TestWebSocket.current?.fail();
+    await waitFor(() => container.querySelector(".connection-status.error") !== null);
+
+    expect(container.querySelector(".connection-status.error")?.textContent).toContain("连接失败");
+    expect(container.querySelector(".toast")).toBeNull();
   });
 
   it("returns from the room entry screen to username selection", async () => {

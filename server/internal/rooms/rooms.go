@@ -93,7 +93,7 @@ func (r *Registry) Create(ctx context.Context, hostID, username, profileID strin
 		}
 		now := time.Now().UTC()
 		room := &Room{
-			Code: code, HostID: hostID, Board: game.NewBoard(),
+			Code: code, HostID: hostID, Board: game.NewBoardForMode(game.TwoVsTwo),
 			State:        game.NewState(game.FourDark, game.Standard, randomOpening(), now),
 			Participants: map[string]*Participant{}, Logger: r.logger, DB: r.db, SeenRequests: map[string]map[string]bool{}, RematchReady: map[game.Seat]bool{},
 		}
@@ -158,6 +158,12 @@ func (r *Registry) Recover(ctx context.Context) error {
 		if state.DrawAccepts == nil {
 			state.DrawAccepts = map[game.Seat]bool{}
 		}
+		if !state.MatchMode.Valid() {
+			state.MatchMode = game.TwoVsTwo
+		}
+		if !state.MatchMode.AllowsSeat(state.Opening) {
+			state.Opening = state.MatchMode.Seats()[0]
+		}
 		for _, seat := range game.Seats {
 			if _, ok := state.Players[seat]; !ok {
 				state.Players[seat] = game.Player{}
@@ -165,7 +171,7 @@ func (r *Registry) Recover(ctx context.Context) error {
 		}
 		room := &Room{
 			Code: saved.InviteCode, HostID: "profile:" + saved.HostProfileID,
-			State: state, Board: game.NewBoard(), Participants: map[string]*Participant{},
+			State: state, Board: game.NewBoardForMode(state.MatchMode), Participants: map[string]*Participant{},
 			Logger: r.logger, DB: r.db, PersistentID: saved.ID, MatchID: saved.MatchID, Sequence: saved.Sequence,
 			SeenRequests: map[string]map[string]bool{},
 			RematchReady: map[game.Seat]bool{},
@@ -177,9 +183,12 @@ func (r *Registry) Recover(ctx context.Context) error {
 		for _, savedParticipant := range participants {
 			id := "profile:" + savedParticipant.ProfileID
 			seat := game.Seat(savedParticipant.Seat)
-			participant := &Participant{ID: id, ProfileID: savedParticipant.ProfileID, Username: savedParticipant.Username, Seat: seat, Spectator: savedParticipant.Role != "player" || !seat.Valid(), Ready: false, Connected: false, JoinedAt: time.Now().UTC()}
+			participant := &Participant{ID: id, ProfileID: savedParticipant.ProfileID, Username: savedParticipant.Username, Seat: seat, Spectator: savedParticipant.Role != "player" || !seat.Valid() || !state.SeatEnabled(seat), Ready: false, Connected: false, JoinedAt: time.Now().UTC()}
+			if participant.Spectator && !state.SeatEnabled(seat) {
+				participant.Seat = ""
+			}
 			room.Participants[id] = participant
-			if seat.Valid() {
+			if state.SeatEnabled(seat) {
 				player := state.Players[seat]
 				player.Username = savedParticipant.Username
 				player.Ready = savedParticipant.Ready
@@ -226,11 +235,16 @@ func newRoomCode() (string, error) {
 }
 
 func randomOpening() game.Seat {
+	return randomOpeningForMode(game.TwoVsTwo)
+}
+
+func randomOpeningForMode(mode game.MatchMode) game.Seat {
+	seats := mode.Seats()
 	var b [1]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return game.North
+		return seats[0]
 	}
-	return game.Seats[int(b[0])%len(game.Seats)]
+	return seats[int(b[0])%len(seats)]
 }
 
 func (r *Room) PublicInfo() map[string]any {
@@ -254,7 +268,7 @@ func (r *Room) publicInfoLocked() map[string]any {
 	}
 	return map[string]any{
 		"code": r.Code, "hostUsername": hostUsername, "phase": r.State.Phase,
-		"mode": r.State.Mode, "clock": r.State.Clock, "opening": r.State.Opening,
+		"matchMode": r.State.MatchMode, "mode": r.State.Mode, "clock": r.State.Clock, "opening": r.State.Opening,
 		"participants": players, "spectatorCap": 50,
 	}
 }
@@ -469,6 +483,10 @@ func isRoomControl(command string) bool {
 	}
 }
 
+func isMatchModeChange(command string) bool {
+	return command == "room.mode"
+}
+
 func (r *Room) Handle(id string, envelope Envelope, now time.Time) error {
 	return r.HandleContext(context.Background(), id, envelope, now)
 }
@@ -480,7 +498,7 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 	if !ok {
 		return errors.New("participant not found")
 	}
-	if participant.Spectator && envelope.Type != "seat.select" && !isRoomControl(envelope.Type) && !(envelope.Type == "settings.update" && participant.ID == r.HostID) {
+	if participant.Spectator && envelope.Type != "seat.select" && !isRoomControl(envelope.Type) && !isMatchModeChange(envelope.Type) && !(envelope.Type == "settings.update" && participant.ID == r.HostID) {
 		return errors.New("spectators cannot issue commands")
 	}
 	if r.State.Paused && !isRoomControl(envelope.Type) {
@@ -497,7 +515,10 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 	beforeMatchID := r.MatchID
 	beforeRematchReady := r.RematchReady
 	beforeSeenRequests := r.SeenRequests
-	beforeParticipant := snapshotParticipant(participant)
+	beforeParticipants := map[string]participantState{}
+	for participantID, current := range r.Participants {
+		beforeParticipants[participantID] = snapshotParticipant(current)
+	}
 	var err error
 	switch envelope.Type {
 	case "room.start":
@@ -519,6 +540,13 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 		}
 	case "seat.leave":
 		err = r.leaveSeatLocked(participant)
+	case "room.mode":
+		var payload struct {
+			MatchMode game.MatchMode `json:"matchMode"`
+		}
+		if err = json.Unmarshal(envelope.Payload, &payload); err == nil {
+			err = r.switchMatchModeLocked(payload.MatchMode, now)
+		}
 	case "settings.update":
 		if participant.ID != r.HostID {
 			err = errors.New("only the host may change room settings")
@@ -579,7 +607,7 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 			} else {
 				r.RematchReady[participant.Seat] = payload.Ready
 				allReady := true
-				for _, seat := range game.Seats {
+				for _, seat := range r.State.RequiredSeats() {
 					if !r.RematchReady[seat] {
 						allReady = false
 						break
@@ -604,7 +632,11 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 				r.MatchID = beforeMatchID
 				r.RematchReady = beforeRematchReady
 				r.SeenRequests = beforeSeenRequests
-				restoreParticipant(participant, beforeParticipant)
+				for participantID, state := range beforeParticipants {
+					if current, ok := r.Participants[participantID]; ok {
+						restoreParticipant(current, state)
+					}
+				}
 				return fmt.Errorf("persist participant: %w", persistErr)
 			}
 		}
@@ -614,7 +646,11 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 			r.MatchID = beforeMatchID
 			r.RematchReady = beforeRematchReady
 			r.SeenRequests = beforeSeenRequests
-			restoreParticipant(participant, beforeParticipant)
+			for participantID, state := range beforeParticipants {
+				if current, ok := r.Participants[participantID]; ok {
+					restoreParticipant(current, state)
+				}
+			}
 			return fmt.Errorf("persist command: %w", persistErr)
 		}
 		if envelope.RequestID != "" {
@@ -627,12 +663,44 @@ func (r *Room) HandleContext(ctx context.Context, id string, envelope Envelope, 
 	return err
 }
 
+func (r *Room) switchMatchModeLocked(matchMode game.MatchMode, now time.Time) error {
+	if !matchMode.Valid() {
+		return errors.New("invalid match mode")
+	}
+	if r.State.Phase != game.Lobby && r.State.Phase != game.Setup {
+		return errors.New("match mode can only be changed before the match starts")
+	}
+	if r.State.MatchMode == matchMode {
+		return nil
+	}
+	opening := r.State.Opening
+	if !matchMode.AllowsSeat(opening) {
+		opening = randomOpeningForMode(matchMode)
+	}
+	version := r.State.Version + 1
+	state := game.NewStateWithMatchMode(matchMode, r.State.Mode, r.State.Clock, opening, now)
+	state.Version = version
+	r.State = state
+	r.Board = game.NewBoardForMode(matchMode)
+	for _, participant := range r.Participants {
+		participant.Seat = ""
+		participant.Ready = false
+		participant.Spectator = true
+	}
+	r.RematchReady = map[game.Seat]bool{}
+	r.SeenRequests = map[string]map[string]bool{}
+	return nil
+}
+
 func (r *Room) selectSeatLocked(participant *Participant, seat game.Seat) error {
 	if r.State.Phase != game.Lobby && r.State.Phase != game.Setup {
 		return errors.New("seats are closed")
 	}
 	if !seat.Valid() {
 		return errors.New("invalid seat")
+	}
+	if !r.State.SeatEnabled(seat) {
+		return errors.New("seat is not available in this match mode")
 	}
 	for _, other := range r.Participants {
 		if other.ID != participant.ID && !other.Spectator && other.Seat == seat {
@@ -690,7 +758,7 @@ func (r *Room) leaveSeatLocked(participant *Participant) error {
 }
 
 func (r *Room) selectDeploymentLocked(participant *Participant, pieces map[string]game.Piece) error {
-	if !participant.Seat.Valid() {
+	if !participant.Seat.Valid() || !r.State.SeatEnabled(participant.Seat) {
 		return errors.New("select a seat first")
 	}
 	if err := game.ValidateDeployment(r.Board, participant.Seat, pieces); err != nil {
@@ -735,7 +803,10 @@ func (r *Room) persistLocked(ctx context.Context, eventType string) error {
 			continue
 		}
 		player := r.State.Players[participant.Seat]
-		if err := r.DB.UpsertMatchSeat(ctx, r.MatchID, participant.Seat.String(), participant.ProfileID, participant.Seat.Team(), player.Eliminated, player.EliminationReason); err != nil {
+		if !r.State.SeatEnabled(participant.Seat) {
+			continue
+		}
+		if err := r.DB.UpsertMatchSeat(ctx, r.MatchID, participant.Seat.String(), participant.ProfileID, r.State.Team(participant.Seat), player.Eliminated, player.EliminationReason); err != nil {
 			return err
 		}
 	}
@@ -774,7 +845,7 @@ func (r *Room) persistParticipantLocked(ctx context.Context, participant *Partic
 }
 
 func (r *Room) resetRematchLocked(ctx context.Context, now time.Time) error {
-	opening := randomOpening()
+	opening := randomOpeningForMode(r.State.MatchMode)
 	newMatchID := ""
 	if r.DB != nil {
 		matchID, err := r.DB.CreateMatch(ctx, r.PersistentID, string(r.State.Mode), string(r.State.Clock), string(opening))
@@ -784,7 +855,7 @@ func (r *Room) resetRematchLocked(ctx context.Context, now time.Time) error {
 		newMatchID = matchID
 	}
 	version := r.State.Version + 1
-	r.State = game.NewState(r.State.Mode, r.State.Clock, opening, now)
+	r.State = game.NewStateWithMatchMode(r.State.MatchMode, r.State.Mode, r.State.Clock, opening, now)
 	r.State.Version = version
 	for _, participant := range r.Participants {
 		participant.Seat = ""
@@ -808,7 +879,7 @@ func (r *Room) resetRoomLocked(ctx context.Context, now time.Time) error {
 		}
 	}
 
-	opening := randomOpening()
+	opening := randomOpeningForMode(r.State.MatchMode)
 	newMatchID := r.MatchID
 	if r.State.Phase == game.Finished && r.DB != nil {
 		matchID, err := r.DB.CreateMatch(ctx, r.PersistentID, string(r.State.Mode), string(r.State.Clock), string(opening))
@@ -818,9 +889,10 @@ func (r *Room) resetRoomLocked(ctx context.Context, now time.Time) error {
 		newMatchID = matchID
 	}
 	version := r.State.Version + 1
-	state := game.NewState(r.State.Mode, r.State.Clock, opening, now)
+	matchMode := r.State.MatchMode
+	state := game.NewStateWithMatchMode(matchMode, r.State.Mode, r.State.Clock, opening, now)
 	state.Version = version
-	for _, seat := range game.Seats {
+	for _, seat := range r.State.RequiredSeats() {
 		player := r.State.Players[seat]
 		if player.Username == "" {
 			continue
@@ -832,7 +904,7 @@ func (r *Room) resetRoomLocked(ctx context.Context, now time.Time) error {
 	}
 	for _, participant := range r.Participants {
 		participant.Ready = false
-		if participant.Seat.Valid() && !participant.Spectator {
+		if participant.Seat.Valid() && state.SeatEnabled(participant.Seat) && !participant.Spectator {
 			continue
 		}
 		participant.Seat = ""

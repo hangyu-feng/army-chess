@@ -437,6 +437,126 @@ func TestNewMembersStartAsSpectatorsAndLiveViewListsEveryone(t *testing.T) {
 	}
 }
 
+func TestRoomModeSwitchMovesEveryParticipantToSpectatorsAndResetsSetup(t *testing.T) {
+	registry := rooms.NewRegistry(slog.Default(), nil)
+	room, err := registry.Create(context.Background(), "host", "host_user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, participant := range []struct{ id, username string }{{"south", "south_user"}, {"spectator", "spectator_user"}} {
+		if err := room.Join(context.Background(), participant.id, participant.username, "", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	for id, seat := range map[string]game.Seat{"host": game.North, "south": game.South} {
+		payload, _ := json.Marshal(map[string]string{"seat": string(seat)})
+		if err := room.Handle(id, rooms.Envelope{Type: "seat.select", Payload: payload}, now); err != nil {
+			t.Fatalf("select %s: %v", seat, err)
+		}
+	}
+	if err := room.Handle("spectator", rooms.Envelope{Type: "room.mode", Payload: json.RawMessage(`{"matchMode":"one_vs_one"}`)}, now); err != nil {
+		t.Fatalf("spectator could not switch to 1v1: %v", err)
+	}
+	if room.State.MatchMode != game.OneVsOne || room.Board.Version != "board.1v1" || room.State.Phase != game.Lobby || len(room.State.Pieces) != 0 {
+		t.Fatalf("mode switch did not reset the room: mode=%s phase=%s pieces=%d", room.State.MatchMode, room.State.Phase, len(room.State.Pieces))
+	}
+	for id, participant := range room.Participants {
+		if participant.Seat.Valid() || !participant.Spectator || participant.Ready {
+			t.Fatalf("participant %s was not returned to spectators: %#v", id, participant)
+		}
+	}
+	if err := room.Handle("host", rooms.Envelope{Type: "seat.select", Payload: json.RawMessage(`{"seat":"east"}`)}, now); err == nil {
+		t.Fatal("east was available after switching to 1v1")
+	}
+	if info := room.PublicInfo(); info["matchMode"] != game.OneVsOne {
+		t.Fatalf("public room info omitted 1v1 mode: %#v", info)
+	}
+	if err := room.Handle("spectator", rooms.Envelope{Type: "room.mode", Payload: json.RawMessage(`{"matchMode":"two_vs_two"}`)}, now); err != nil {
+		t.Fatalf("spectator could not switch back to 2v2: %v", err)
+	}
+	if room.State.MatchMode != game.TwoVsTwo || room.Board.Version != "board.v2" {
+		t.Fatalf("mode did not switch back to 2v2: %s", room.State.MatchMode)
+	}
+}
+
+func TestRoomModeSwitchDuringSetupReturnsToLobbyAndPlayingModeIsLocked(t *testing.T) {
+	registry := rooms.NewRegistry(slog.Default(), nil)
+	room, err := registry.Create(context.Background(), "host", "host_user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := room.Join(context.Background(), "south", "south_user", "", false); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for id, seat := range map[string]game.Seat{"host": game.North, "south": game.South} {
+		payload, _ := json.Marshal(map[string]string{"seat": string(seat)})
+		if err := room.Handle(id, rooms.Envelope{Type: "seat.select", Payload: payload}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := room.Handle("host", rooms.Envelope{Type: "room.mode", Payload: json.RawMessage(`{"matchMode":"one_vs_one"}`)}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := room.Handle("host", rooms.Envelope{Type: "seat.select", Payload: json.RawMessage(`{"seat":"north"}`)}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := room.Handle("south", rooms.Envelope{Type: "seat.select", Payload: json.RawMessage(`{"seat":"south"}`)}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := room.Handle("host", rooms.Envelope{Type: "room.start"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if room.State.Phase != game.Setup {
+		t.Fatalf("room did not enter setup: %s", room.State.Phase)
+	}
+	if err := room.Handle("host", rooms.Envelope{Type: "room.mode", Payload: json.RawMessage(`{"matchMode":"two_vs_two"}`)}, now); err != nil {
+		t.Fatal(err)
+	}
+	if room.State.Phase != game.Lobby || room.State.MatchMode != game.TwoVsTwo {
+		t.Fatalf("setup mode switch did not reset lobby: phase=%s mode=%s", room.State.Phase, room.State.MatchMode)
+	}
+	if err := room.Handle("host", rooms.Envelope{Type: "room.start"}, now); err == nil {
+		t.Fatal("2v2 started without four players")
+	}
+
+	// A fresh 1v1 room can start, but changing its mode is then rejected.
+	room2, err := registry.Create(context.Background(), "host-2", "host_two", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := room2.Join(context.Background(), "south-2", "south_two", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := room2.Handle("host-2", rooms.Envelope{Type: "room.mode", Payload: json.RawMessage(`{"matchMode":"one_vs_one"}`)}, now); err != nil {
+		t.Fatal(err)
+	}
+	if room2.Board.Version != "board.1v1" {
+		t.Fatalf("1v1 room retained the four-country board: %s", room2.Board.Version)
+	}
+	for id, seat := range map[string]game.Seat{"host-2": game.North, "south-2": game.South} {
+		payload, _ := json.Marshal(map[string]string{"seat": string(seat)})
+		if err := room2.Handle(id, rooms.Envelope{Type: "seat.select", Payload: payload}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := room2.Handle("host-2", rooms.Envelope{Type: "room.start"}, now); err != nil {
+		t.Fatal(err)
+	}
+	for id := range map[string]game.Seat{"host-2": game.North, "south-2": game.South} {
+		if err := room2.Handle(id, rooms.Envelope{Type: "ready", Payload: json.RawMessage(`{"ready":true}`)}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if room2.State.Phase != game.Playing {
+		t.Fatalf("1v1 room did not start: %s", room2.State.Phase)
+	}
+	if err := room2.Handle("host-2", rooms.Envelope{Type: "room.mode", Payload: json.RawMessage(`{"matchMode":"two_vs_two"}`)}, now); err == nil {
+		t.Fatal("playing room allowed a match-mode switch")
+	}
+}
+
 func TestSpectatorLimitCountsOnlyUnseatedMembers(t *testing.T) {
 	registry := rooms.NewRegistry(slog.Default(), nil)
 	room, err := registry.Create(context.Background(), "host", "host_user", "")

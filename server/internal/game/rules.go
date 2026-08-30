@@ -14,7 +14,7 @@ var (
 	ErrFriendlyFire = errors.New("allied pieces cannot attack")
 	ErrInvalidSetup = errors.New("deployment is invalid")
 	ErrAlreadyReady = errors.New("player is already ready")
-	ErrNotReady     = errors.New("all four players must be ready")
+	ErrNotReady     = errors.New("all required players must be ready")
 )
 
 func DefaultDeployment(board *Board, seat Seat) map[string]Piece {
@@ -138,7 +138,7 @@ func (s *State) Start(board *Board, now time.Time) error {
 	if s.Phase != Lobby && s.Phase != Setup {
 		return errors.New("match has already started")
 	}
-	for _, seat := range Seats {
+	for _, seat := range s.RequiredSeats() {
 		player := s.Players[seat]
 		if player.Username == "" {
 			return ErrNotReady
@@ -171,8 +171,11 @@ func (s *State) Start(board *Board, now time.Time) error {
 }
 
 func (s *State) SetReady(board *Board, seat Seat, ready bool, now time.Time) error {
+	if !s.SeatEnabled(seat) {
+		return errors.New("seat is not available in this match mode")
+	}
 	if s.Phase == Lobby {
-		for _, required := range Seats {
+		for _, required := range s.RequiredSeats() {
 			if s.Players[required].Username == "" {
 				return ErrNotReady
 			}
@@ -203,7 +206,7 @@ func (s *State) SetReady(board *Board, seat Seat, ready bool, now time.Time) err
 	s.Version++
 	if ready {
 		allReady := true
-		for _, current := range Seats {
+		for _, current := range s.RequiredSeats() {
 			if !s.Players[current].Ready {
 				allReady = false
 			}
@@ -216,7 +219,7 @@ func (s *State) SetReady(board *Board, seat Seat, ready bool, now time.Time) err
 }
 
 func (s *State) LegalMoves(board *Board, seat Seat) []string {
-	if s.Phase != Playing || s.Players[seat].Eliminated {
+	if s.Phase != Playing || !s.SeatEnabled(seat) || s.Players[seat].Eliminated {
 		return nil
 	}
 	result := []string{}
@@ -302,11 +305,14 @@ func (s *State) canLand(board *Board, piece Piece, nodeID string) bool {
 	if !ok {
 		return false
 	}
+	if node.Type == Mountain {
+		return false
+	}
 	target, occupied := s.Pieces[nodeID]
 	if !occupied {
 		return true
 	}
-	if target.Owner.Team() == piece.Owner.Team() {
+	if s.Team(target.Owner) == s.Team(piece.Owner) {
 		return false
 	}
 	return node.Type != Camp
@@ -335,7 +341,7 @@ func (s *State) Move(board *Board, seat Seat, from, to string, now time.Time) (s
 	if s.Phase != Playing {
 		return "", ErrNotPlaying
 	}
-	if s.Turn != seat {
+	if !s.SeatEnabled(seat) || s.Turn != seat {
 		return "", ErrNotYourTurn
 	}
 	piece, ok := s.Pieces[from]
@@ -347,7 +353,7 @@ func (s *State) Move(board *Board, seat Seat, from, to string, now time.Time) (s
 		return "", ErrIllegalMove
 	}
 	target, occupied := s.Pieces[to]
-	if occupied && target.Owner.Team() == piece.Owner.Team() {
+	if occupied && s.Team(target.Owner) == s.Team(piece.Owner) {
 		return "", ErrFriendlyFire
 	}
 	delete(s.Pieces, from)
@@ -428,7 +434,7 @@ func (s *State) advanceTurnWithBoard(board *Board, now time.Time) {
 	for seat, player := range s.Players {
 		eliminated[seat] = player.Eliminated
 	}
-	next := nextSeat(s.Turn, eliminated)
+	next := nextSeat(s.Turn, eliminated, s.RequiredSeats())
 	if next == "" {
 		return
 	}
@@ -442,11 +448,13 @@ func (s *State) advanceTurnWithBoard(board *Board, now time.Time) {
 		s.advanceTurnWithBoard(board, now)
 		return
 	}
-	if s.teamEliminated(North) {
-		s.finish("win", East.Team())
-	}
-	if s.teamEliminated(East) {
-		s.finish("win", North.Team())
+	if len(s.ActiveSeats()) <= 1 {
+		for _, seat := range s.RequiredSeats() {
+			if !s.Players[seat].Eliminated {
+				s.finish("win", s.Team(seat))
+				break
+			}
+		}
 	}
 }
 
@@ -455,7 +463,7 @@ func (s *State) Tick(board *Board, now time.Time) bool {
 		return false
 	}
 	if s.Phase == Setup && !s.SetupDeadline.IsZero() && !now.Before(s.SetupDeadline) {
-		for _, seat := range Seats {
+		for _, seat := range s.RequiredSeats() {
 			player := s.Players[seat]
 			deployment := map[string]Piece{}
 			for node, piece := range s.Pieces {
@@ -491,7 +499,7 @@ func (s *State) Resign(board *Board, seat Seat, now time.Time) error {
 	if s.Paused {
 		return errors.New("match is paused")
 	}
-	if s.Phase != Playing || s.Players[seat].Eliminated {
+	if s.Phase != Playing || !s.SeatEnabled(seat) || s.Players[seat].Eliminated {
 		return ErrNotPlaying
 	}
 	s.eliminate(seat, "resigned")
@@ -504,7 +512,7 @@ func (s *State) OfferDraw(seat Seat) error {
 	if s.Paused {
 		return errors.New("match is paused")
 	}
-	if s.Phase != Playing || s.Players[seat].Eliminated {
+	if s.Phase != Playing || !s.SeatEnabled(seat) || s.Players[seat].Eliminated {
 		return ErrNotPlaying
 	}
 	if s.DrawOffer != "" {
@@ -520,7 +528,7 @@ func (s *State) RespondDraw(seat Seat, accept bool) error {
 	if s.Paused {
 		return errors.New("match is paused")
 	}
-	if s.DrawOffer == "" || s.Players[seat].Eliminated {
+	if s.DrawOffer == "" || !s.SeatEnabled(seat) || s.Players[seat].Eliminated {
 		return errors.New("no draw offer is pending")
 	}
 	if !accept {
@@ -552,7 +560,7 @@ func (s *State) eliminate(seat Seat, reason string) {
 		}
 	}
 	if s.teamEliminated(seat) {
-		s.finish("win", oppositeTeam(seat.Team()))
+		s.finish("win", s.opponentTeam(seat))
 	}
 }
 
@@ -565,20 +573,24 @@ func (s *State) revealFlag(owner Seat) {
 	}
 }
 
-func oppositeTeam(team string) string {
-	if team == "north_south" {
-		return "east_west"
-	}
-	return "north_south"
-}
-
 func (s *State) teamEliminated(seat Seat) bool {
-	for _, member := range Seats {
-		if member.Team() == seat.Team() && !s.Players[member].Eliminated {
+	team := s.Team(seat)
+	for _, member := range s.RequiredSeats() {
+		if s.Team(member) == team && !s.Players[member].Eliminated {
 			return false
 		}
 	}
 	return true
+}
+
+func (s *State) opponentTeam(seat Seat) string {
+	team := s.Team(seat)
+	for _, member := range s.RequiredSeats() {
+		if s.Team(member) != team {
+			return s.Team(member)
+		}
+	}
+	return ""
 }
 
 func (s *State) finish(outcome, reason string) {

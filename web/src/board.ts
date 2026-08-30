@@ -1,5 +1,5 @@
 export type BoardSeat = "north" | "east" | "south" | "west";
-export type BoardNodeType = "station" | "camp" | "headquarters";
+export type BoardNodeType = "station" | "camp" | "headquarters" | "frontline" | "mountain";
 export type BoardEdgeType = "road" | "rail";
 
 export type BoardNode = {
@@ -100,3 +100,67 @@ function buildBoard(): BoardDefinition {
 }
 
 export const boardDefinition = buildBoard();
+
+function buildOneVsOneBoard(): BoardDefinition {
+  const nodes: Record<string, BoardNode> = {};
+  const edges: BoardEdge[] = [];
+  const edgeKeys = new Set<string>();
+  const columns = ["1L", "2L", "3", "2R", "1R"];
+
+  function addEdge(from: string, to: string, type: BoardEdgeType) {
+    const key = [from, to].sort().join("|");
+    if (edgeKeys.has(key)) return;
+    edgeKeys.add(key);
+    edges.push({ from, to, type });
+  }
+
+  function addZone(seat: "north" | "south", startY: number) {
+    for (let row = 1; row <= 6; row += 1) {
+      for (let col = 0; col < columns.length; col += 1) {
+        const id = `${seat}-r${row}-${columns[col]}`;
+        const camp = (row === 2 || row === 4) && (col === 1 || col === 3) || row === 3 && col === 2;
+        const headquarters = row === 6 && (col === 1 || col === 3);
+        nodes[id] = {
+          id, x: 100 + col * 140, y: startY + (row - 1) * 75,
+          type: camp ? "camp" : headquarters ? "headquarters" : "station",
+          deployFor: seat, row, column: columns[col],
+        };
+      }
+    }
+
+    for (const row of [2, 3, 4, 6]) for (let col = 0; col < 4; col += 1) addEdge(`${seat}-r${row}-${columns[col]}`, `${seat}-r${row}-${columns[col + 1]}`, "road");
+    for (const col of [1, 2, 3]) for (let row = 2; row < 6; row += 1) addEdge(`${seat}-r${row}-${columns[col]}`, `${seat}-r${row + 1}-${columns[col]}`, "road");
+    for (const col of [0, 4]) addEdge(`${seat}-r5-${columns[col]}`, `${seat}-r6-${columns[col]}`, "road");
+    for (const row of [1, 5]) for (let col = 0; col < 4; col += 1) addEdge(`${seat}-r${row}-${columns[col]}`, `${seat}-r${row}-${columns[col + 1]}`, "rail");
+    for (const col of [0, 4]) for (let row = 1; row < 5; row += 1) addEdge(`${seat}-r${row}-${columns[col]}`, `${seat}-r${row + 1}-${columns[col]}`, "rail");
+
+    for (const [row, col] of [[2, 1], [2, 3], [3, 2], [4, 1], [4, 3]]) {
+      for (const [deltaRow, deltaCol] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) {
+        addEdge(`${seat}-r${row}-${columns[col]}`, `${seat}-r${row + deltaRow}-${columns[col + deltaCol]}`, "road");
+      }
+    }
+  }
+
+  addZone("north", 100);
+  addZone("south", 785);
+  for (const [id, x, type] of [
+    ["frontline-1L", 100, "frontline"], ["mountain-2L", 240, "mountain"],
+    ["frontline-3", 380, "frontline"], ["mountain-2R", 520, "mountain"],
+    ["frontline-1R", 660, "frontline"],
+  ] as const) nodes[id] = { id, x, y: 630, type };
+  for (const [top, frontline, bottom] of [
+    ["north-r1-1L", "frontline-1L", "south-r1-1L"],
+    ["north-r1-3", "frontline-3", "south-r1-3"],
+    ["north-r1-1R", "frontline-1R", "south-r1-1R"],
+  ]) {
+    addEdge(top, frontline, "rail");
+    addEdge(frontline, bottom, "rail");
+  }
+  return { version: "board.1v1", width: 760, height: 1260, nodes, edges };
+}
+
+export const oneVsOneBoardDefinition = buildOneVsOneBoard();
+
+export function boardForMatchMode(matchMode?: "two_vs_two" | "one_vs_one"): BoardDefinition {
+  return matchMode === "one_vs_one" ? oneVsOneBoardDefinition : boardDefinition;
+}

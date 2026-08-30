@@ -1,8 +1,9 @@
 # 四国军棋规则
 
-This document defines the standard four-player, two-versus-two form of
-Chinese Army Chess (四国军棋) targeted by this project. It is the game-rule
-specification, not a description of a particular UI or hosting platform.
+This document defines the standard four-player, two-versus-two form and the
+two-player, one-versus-one variant of Chinese Army Chess (四国军棋) targeted by
+this project. It is the game-rule specification, not a description of a
+particular UI or hosting platform.
 
 The game has three common visibility modes—four-dark, double-visible, and
 fully visible—but the board, movement, combat, and victory rules below are the
@@ -20,8 +21,16 @@ There are four seats around the board: north, east, south, and west.
 
 The objective is to eliminate both countries on the opposing team. A country
 is eliminated when its flag is captured or when it has no legal move. Capturing
-one country’s flag does not end the match by itself: the surviving teammate on
-that team may continue playing.
+one country’s flag does not end a two-versus-two match by itself: the surviving
+teammate on that team may continue playing.
+
+### 1.1 One-versus-one variant
+
+The project also defines a separate two-player ruleset. The complete 1v1
+rules, piece definitions, and 5 × 13 board topology are documented in
+[rules-1v1.md](rules-1v1.md). It is not the four-country board with two seats
+simply disabled: it has no nine-palace and uses a central band with three
+frontlines and two mountains.
 
 ## 2. Board
 
@@ -277,8 +286,10 @@ hidden during play.
 The following are application policies rather than traditional board rules:
 
 - the server is authoritative for the board, turn, combat, and clock;
-- a room starts only after all four seats submit valid deployments and ready;
-- any room member may begin deployment once all four seats are occupied;
+- a room starts only after all seats required by the selected match mode submit
+  valid deployments and ready;
+- any room member may begin deployment once all seats required by the selected
+  match mode are occupied;
 - any room member may pause or resume an active match, and pausing freezes the
   server-side turn clock;
 - stopping records a stopped match, while resetting returns the room to lobby

@@ -1,9 +1,10 @@
 # Army Chess / 四国军棋
 
-Army Chess is a self-hosted web application for four-player, two-versus-two
-Chinese Army Chess (四国军棋). It provides private invite-code rooms, four
-player seats, spectators, hidden-information views, reconnection, persistent
-matches, replay, profiles, and Docker Compose deployment.
+Army Chess is a self-hosted web application for Chinese Army Chess (四国军棋),
+supporting both four-player, two-versus-two matches and two-player,
+one-versus-one matches. It provides private invite-code rooms, player seats,
+spectators, hidden-information views, reconnection, persistent matches,
+replay, profiles, and Docker Compose deployment.
 
 ## Current v1 scope
 
@@ -32,10 +33,11 @@ player can leave their seat and return to the spectator list, then take another
 open seat later if one is available. Only seated players can arrange pieces or
 submit game actions; spectators can watch and join when a seat opens.
 
-The room-control panel is available to every room member. It starts deployment
-once all four seats are filled, pauses or resumes an active match, stops a
-match, and resets the room to the lobby with the seated players and default
-deployments preserved.
+The room-control panel is available to every room member. It lets members
+choose 1 vs 1 or 2 vs 2 while the room is in the lobby or setup phase. Changing
+the mode moves everyone to spectators and resets the room to the lobby. The
+room can start deployment once all seats required by the selected mode are
+filled, pause or resume an active match, stop a match, and reset the room.
 
 ## Production deployment on a VPS
 
@@ -310,6 +312,8 @@ both suites and the frontend production build.
 
 - [PLAN.md](PLAN.md): product specification and roadmap.
 - [docs/rules.md](docs/rules.md): executable v1 rules baseline.
+- [docs/rules-1v1.md](docs/rules-1v1.md): canonical 1v1 rules and 5 × 13 board specification.
+- [contracts/board.1v1.json](contracts/board.1v1.json): executable 1v1 board contract.
 - [docs/board-layout.md](docs/board-layout.md): canonical board diagram, coordinates, and edge topology.
 - [docs/architecture.md](docs/architecture.md): runtime architecture.
 - [docs/operations.md](docs/operations.md): VPS operations reference.
